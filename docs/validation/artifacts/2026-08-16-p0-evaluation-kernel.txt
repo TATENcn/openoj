@@ -1,0 +1,52 @@
+OpenOJ P0-A evaluation kernel validation summary
+Date: 2026-08-16
+Revision: working tree on codex/p0-evaluation-kernel, based on f798729f3f89d37a8ed22e2fe652063a419029a6
+
+Environment
+- Arch Linux, Linux 7.1.8-zen1-3-zen, x86_64
+- 8 vCPU, AMD Ryzen 9 9950X3D, VMware full virtualization
+- 15 GiB RAM, /dev/kvm absent
+- rustc 1.97.1 (8bab26f4f 2026-07-14)
+- cargo 1.97.1 (c980f4866 2026-06-30)
+- cargo-deny 0.20.2
+
+Command: cargo fmt --all -- --check
+Result: exit 0
+
+Command: cargo check --workspace --all-targets --locked
+Result: exit 0; openoj-domain, openoj-protocol, and openoj-application checked
+
+Command: cargo clippy --workspace --all-targets --locked -- -D warnings
+Result: exit 0; no warnings
+
+Command: cargo test --workspace --all-targets --locked
+Result: exit 0; 16 passed, 0 failed
+- openoj-application unit: 4 passed
+- walking_skeleton integration: 1 passed
+- openoj-domain unit: 6 passed
+- openoj-protocol unit/conformance: 5 passed
+
+Command: python3 scripts/check-workspace.py
+Result: exit 0; workspace dependency direction checks passed
+
+Command: bash scripts/check-docs.sh
+Result: exit 0; documentation and skill structure checks passed
+
+Command: cargo deny --locked check advisories bans sources
+Result: exit 0; advisories ok, bans ok, sources ok
+Warnings: duplicate hashbrown 0.16.1/0.17.1 and syn 2.0.119/3.0.3 dependency versions
+
+Command: cargo deny --locked check
+Result: exit 4; advisories ok, bans ok, sources ok, licenses failed
+Reason: repository has no cargo-deny license allow list because the license policy remains Proposed
+Decision: full license enforcement is deferred during prototyping; it remains mandatory before formal distribution
+
+Command: git diff --check
+Result: exit 0
+
+Not run / Unverified
+- GitHub Actions on this branch: branch has not been committed or pushed
+- License compatibility for formal distribution: blocked on human license/DCO/CLA decision
+- KVM, Firecracker, jailer, guest, runtime image, untrusted execution, host survival: not implemented; /dev/kvm absent
+- PostgreSQL, durable idempotency, HTTP/API, real cancellation races, audit persistence: not implemented
+- Performance: no claim and no benchmark

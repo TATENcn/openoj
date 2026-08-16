@@ -1,0 +1,16 @@
+[package]
+name = "openoj-application"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+openoj-domain.workspace = true
+
+[dev-dependencies]
+openoj-protocol.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

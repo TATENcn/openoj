@@ -5,6 +5,7 @@ last_reviewed: 2026-08-16
 applies_to: open evaluation protocol
 references:
   - versioning.md
+  - v0alpha1.md
   - ../product/glossary.md
   - ../requirements/functional.md
 ---
@@ -23,7 +24,7 @@ OpenOJ 计划定义传输无关的开放评测协议。协议描述评测语义�
 - `Capability`：实现支持并被授权的能力。
 - `Event`：排队、开始、阶段完成、重试、取消和终态通知。
 
-外部 canonical 表示计划采用 JSON Schema；内部高频通信可以采用 Protobuf/gRPC，但必须通过显式转换保持同一语义。具体 schema 在第一个垂直切片中创建，当前文档不构成稳定兼容承诺。
+外部 canonical 表示采用 JSON Schema；内部高频通信可以采用 Protobuf/gRPC，但必须通过显式转换保持同一语义。首个请求/结果 schema 已在 `schemas/openoj/v0alpha1/open-evaluation.schema.json` 实现，规范语义见 `v0alpha1.md`。当前协议仍是 alpha，不构成稳定兼容承诺。
 
 ## 设计原则
 

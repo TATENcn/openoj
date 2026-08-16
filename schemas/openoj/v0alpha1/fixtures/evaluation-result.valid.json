@@ -1,0 +1,91 @@
+{
+  "message_type": "evaluation_result",
+  "schema_version": "openoj.evaluation/v0alpha1",
+  "request_id": "req_01",
+  "evaluation_id": "eval_01",
+  "attempt_id": "attempt_01",
+  "problem_version_id": "problem_version_01",
+  "submission_id": "submission_01",
+  "runtime_id": "runtime_cpp_01",
+  "status": "completed",
+  "verdict": "accepted",
+  "score": {
+    "earned": 1,
+    "possible": 1
+  },
+  "stages": [
+    {
+      "stage": "prepare",
+      "status": "succeeded",
+      "usage": {
+        "cpu_time_ms": 0,
+        "wall_time_ms": 0,
+        "memory_peak_bytes": 0,
+        "output_bytes": 0
+      },
+      "diagnostics": [],
+      "evidence": []
+    },
+    {
+      "stage": "build",
+      "status": "succeeded",
+      "usage": {
+        "cpu_time_ms": 0,
+        "wall_time_ms": 0,
+        "memory_peak_bytes": 0,
+        "output_bytes": 0
+      },
+      "diagnostics": [],
+      "evidence": []
+    },
+    {
+      "stage": "run",
+      "status": "succeeded",
+      "usage": {
+        "cpu_time_ms": 0,
+        "wall_time_ms": 0,
+        "memory_peak_bytes": 0,
+        "output_bytes": 0
+      },
+      "diagnostics": [],
+      "evidence": []
+    },
+    {
+      "stage": "check",
+      "status": "succeeded",
+      "usage": {
+        "cpu_time_ms": 0,
+        "wall_time_ms": 0,
+        "memory_peak_bytes": 0,
+        "output_bytes": 0
+      },
+      "diagnostics": [],
+      "evidence": []
+    },
+    {
+      "stage": "aggregate",
+      "status": "succeeded",
+      "usage": {
+        "cpu_time_ms": 0,
+        "wall_time_ms": 0,
+        "memory_peak_bytes": 0,
+        "output_bytes": 0
+      },
+      "diagnostics": [],
+      "evidence": []
+    }
+  ],
+  "usage": {
+    "cpu_time_ms": 0,
+    "wall_time_ms": 0,
+    "memory_peak_bytes": 0,
+    "output_bytes": 0
+  },
+  "diagnostics": [],
+  "evidence": [],
+  "provenance": {
+    "executor_kind": "development_mock",
+    "production_eligible": false,
+    "runtime_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  }
+}

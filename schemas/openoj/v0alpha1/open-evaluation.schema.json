@@ -1,0 +1,575 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openoj:schema:open-evaluation:v0alpha1",
+  "title": "OpenEvaluationMessage",
+  "description": "Canonical v0alpha1 request and result messages for the first OpenOJ evaluation slice.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/EvaluationRequest"
+    },
+    {
+      "$ref": "#/$defs/EvaluationResult"
+    }
+  ],
+  "$defs": {
+    "OpaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "IdempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "ContentDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "MediaType": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 129,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,63}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,63}$"
+    },
+    "ArtifactSensitivity": {
+      "type": "string",
+      "enum": [
+        "public",
+        "private",
+        "hidden"
+      ]
+    },
+    "ArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "digest",
+        "media_type",
+        "size_bytes",
+        "sensitivity"
+      ],
+      "properties": {
+        "artifact_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "digest": {
+          "$ref": "#/$defs/ContentDigest"
+        },
+        "media_type": {
+          "$ref": "#/$defs/MediaType"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1099511627776
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/ArtifactSensitivity"
+        }
+      }
+    },
+    "ProblemVersionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "problem_id",
+        "problem_version_id",
+        "digest"
+      ],
+      "properties": {
+        "problem_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "problem_version_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "digest": {
+          "$ref": "#/$defs/ContentDigest"
+        }
+      }
+    },
+    "RuntimeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_id",
+        "digest"
+      ],
+      "properties": {
+        "runtime_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "digest": {
+          "$ref": "#/$defs/ContentDigest"
+        }
+      }
+    },
+    "SubmissionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "submission_id",
+        "source"
+      ],
+      "properties": {
+        "submission_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "source": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      }
+    },
+    "StageKind": {
+      "type": "string",
+      "enum": [
+        "prepare",
+        "build",
+        "run",
+        "check",
+        "aggregate"
+      ]
+    },
+    "EvaluationPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "stages"
+      ],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "algorithm_batch"
+          ]
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/StageKind"
+          }
+        }
+      }
+    },
+    "NetworkPolicy": {
+      "type": "string",
+      "enum": [
+        "denied"
+      ]
+    },
+    "ResourcePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu_time_ms",
+        "wall_time_ms",
+        "memory_bytes",
+        "output_bytes",
+        "process_limit",
+        "network"
+      ],
+      "properties": {
+        "cpu_time_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "wall_time_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "memory_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1099511627776
+        },
+        "output_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        },
+        "process_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkPolicy"
+        }
+      }
+    },
+    "Capability": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$"
+    },
+    "EvaluationRequest": {
+      "title": "EvaluationRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_type",
+        "schema_version",
+        "request_id",
+        "idempotency_key",
+        "evaluation_id",
+        "attempt_id",
+        "attempt_number",
+        "problem_version",
+        "submission",
+        "runtime",
+        "plan",
+        "policy",
+        "required_capabilities"
+      ],
+      "properties": {
+        "message_type": {
+          "type": "string",
+          "enum": [
+            "evaluation_request"
+          ]
+        },
+        "schema_version": {
+          "type": "string",
+          "enum": [
+            "openoj.evaluation/v0alpha1"
+          ]
+        },
+        "request_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/IdempotencyKey"
+        },
+        "evaluation_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "attempt_number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "problem_version": {
+          "$ref": "#/$defs/ProblemVersionRef"
+        },
+        "submission": {
+          "$ref": "#/$defs/SubmissionRef"
+        },
+        "runtime": {
+          "$ref": "#/$defs/RuntimeRef"
+        },
+        "plan": {
+          "$ref": "#/$defs/EvaluationPlan"
+        },
+        "policy": {
+          "$ref": "#/$defs/ResourcePolicy"
+        },
+        "required_capabilities": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Capability"
+          }
+        }
+      }
+    },
+    "ResourceUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu_time_ms",
+        "wall_time_ms",
+        "memory_peak_bytes",
+        "output_bytes"
+      ],
+      "properties": {
+        "cpu_time_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        },
+        "wall_time_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        },
+        "memory_peak_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1099511627776
+        },
+        "output_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        }
+      }
+    },
+    "Diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "truncated"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "EvidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "kind"
+      ],
+      "properties": {
+        "evidence_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$"
+        },
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      }
+    },
+    "StageStatus": {
+      "type": "string",
+      "enum": [
+        "succeeded",
+        "failed",
+        "cancelled",
+        "skipped"
+      ]
+    },
+    "StageReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "status",
+        "usage",
+        "diagnostics",
+        "evidence"
+      ],
+      "properties": {
+        "stage": {
+          "$ref": "#/$defs/StageKind"
+        },
+        "status": {
+          "$ref": "#/$defs/StageStatus"
+        },
+        "usage": {
+          "$ref": "#/$defs/ResourceUsage"
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          }
+        }
+      }
+    },
+    "EvaluationStatus": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "Verdict": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "wrong_answer",
+        "compile_error",
+        "runtime_error",
+        "time_limit_exceeded",
+        "memory_limit_exceeded",
+        "output_limit_exceeded",
+        "system_error",
+        "cancelled"
+      ]
+    },
+    "Score": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "earned",
+        "possible"
+      ],
+      "properties": {
+        "earned": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "possible": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "ExecutionProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executor_kind",
+        "production_eligible",
+        "runtime_digest"
+      ],
+      "properties": {
+        "executor_kind": {
+          "type": "string",
+          "enum": [
+            "development_mock",
+            "firecracker"
+          ]
+        },
+        "production_eligible": {
+          "type": "boolean"
+        },
+        "runtime_digest": {
+          "$ref": "#/$defs/ContentDigest"
+        },
+        "node_id": {
+          "$ref": "#/$defs/OpaqueId"
+        }
+      }
+    },
+    "EvaluationResult": {
+      "title": "EvaluationResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_type",
+        "schema_version",
+        "request_id",
+        "evaluation_id",
+        "attempt_id",
+        "problem_version_id",
+        "submission_id",
+        "runtime_id",
+        "status",
+        "verdict",
+        "score",
+        "stages",
+        "usage",
+        "diagnostics",
+        "evidence",
+        "provenance"
+      ],
+      "properties": {
+        "message_type": {
+          "type": "string",
+          "enum": [
+            "evaluation_result"
+          ]
+        },
+        "schema_version": {
+          "type": "string",
+          "enum": [
+            "openoj.evaluation/v0alpha1"
+          ]
+        },
+        "request_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "evaluation_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "problem_version_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "submission_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "runtime_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "status": {
+          "$ref": "#/$defs/EvaluationStatus"
+        },
+        "verdict": {
+          "$ref": "#/$defs/Verdict"
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/StageReport"
+          }
+        },
+        "usage": {
+          "$ref": "#/$defs/ResourceUsage"
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          }
+        },
+        "provenance": {
+          "$ref": "#/$defs/ExecutionProvenance"
+        }
+      }
+    }
+  }
+}

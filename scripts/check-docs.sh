@@ -14,6 +14,7 @@ report() {
 while IFS= read -r -d '' file; do
   case "$file" in
     ./.git/*) continue ;;
+    ./target/*) continue ;;
   esac
 
   if [[ ! -s "$file" ]]; then

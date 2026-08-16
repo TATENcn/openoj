@@ -12,6 +12,8 @@ references:
 
 以下是首个垂直切片的目标布局；创建 workspace 时可以通过 ADR 调整名称，但不得破坏依赖方向。
 
+P0-A 当前只实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。未实现组件不创建空 crate；每增加一个 crate，都必须同时交付其边界行为和测试。
+
 ```text
 apps/
   openoj-api/
@@ -66,3 +68,4 @@ plugin-host <- application capability adapters
 - 平台 `unsafe` 必须收敛在最小系统适配模块，并由安全 API 封装。
 - canonical schema 的生成代码不得手工修改。
 - 建立 workspace 后应增加自动依赖方向检查。
+- 当前依赖方向由 `python3 scripts/check-workspace.py` 检查；新增 crate 时必须在同一变更中更新本文和检查策略。
