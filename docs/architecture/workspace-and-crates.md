@@ -1,0 +1,68 @@
+---
+status: Proposed
+owners: OpenOJ maintainers
+last_reviewed: 2026-08-16
+applies_to: Rust workspace and source layout
+references:
+  - overview.md
+  - decisions/0001-rust-and-firecracker.md
+---
+
+# Workspace 与 crate 边界
+
+以下是首个垂直切片的目标布局；创建 workspace 时可以通过 ADR 调整名称，但不得破坏依赖方向。
+
+```text
+apps/
+  openoj-api/
+  openoj-judge-node/
+  openoj-cli/
+crates/
+  openoj-domain/
+  openoj-protocol/
+  openoj-application/
+  openoj-storage/
+  openoj-scheduler/
+  openoj-evaluator/
+  openoj-firecracker/
+  openoj-plugin-host/
+  openoj-observability/
+guest/
+  openoj-guest-agent/
+web/
+schemas/
+infra/
+```
+
+## 依赖方向
+
+```text
+domain <- application <- apps
+   ^           ^
+   |           +-- scheduler / evaluator interfaces
+   +-- protocol conversion boundaries
+
+firecracker <- judge-node
+storage     <- application adapters
+plugin-host <- application capability adapters
+```
+
+## 边界
+
+- `openoj-domain` 只包含领域类型、规则和纯逻辑；不得依赖 async runtime、数据库、HTTP、Firecracker 或 UI。
+- `openoj-protocol` 包含 canonical schema 对应类型和兼容转换；不得承载权限或业务决策。
+- `openoj-application` 编排用例并依赖 trait，不依赖具体数据库和 VMM 实现。
+- `openoj-storage` 实现持久化、transaction、outbox 和 migration，不把数据库类型泄漏到 domain。
+- `openoj-firecracker` 封装 jailer/VMM、vsock、磁盘、网络和回收；不得包含用户、竞赛或计分逻辑。
+- `openoj-judge-node` 组合执行适配器，不能访问控制平面数据库超级权限。
+- `openoj-guest-agent` 面向最小 guest 环境，只依赖 guest 所需协议，不依赖控制平面 crate。
+- `openoj-plugin-host` 是能力 Broker；插件不能直接获取存储、网络或宿主句柄。
+- `apps` 只负责进程组装、配置、生命周期和边界日志，不承载可复用领域实现。
+
+## 规则
+
+- workspace 直接依赖统一声明在根 `Cargo.toml`，版本和 feature 由 workspace 管理。
+- 禁止循环依赖、复制类型绕开边界或通过 re-export 掩盖反向依赖。
+- 平台 `unsafe` 必须收敛在最小系统适配模块，并由安全 API 封装。
+- canonical schema 的生成代码不得手工修改。
+- 建立 workspace 后应增加自动依赖方向检查。

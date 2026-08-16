@@ -1,0 +1,4 @@
+interface:
+  display_name: "Develop OpenOJ"
+  short_description: "Implement scoped OpenOJ changes with required evidence"
+  default_prompt: "Use $develop-openoj to implement a scoped OpenOJ change against its requirements and verification gates."

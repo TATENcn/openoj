@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evolve OpenOJ Protocol"
+  short_description: "Change OpenOJ protocols without silent incompatibility"
+  default_prompt: "Use $evolve-openoj-protocol to evolve an OpenOJ protocol with compatibility evidence."

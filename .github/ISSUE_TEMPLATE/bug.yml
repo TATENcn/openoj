@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible OpenOJ defect or regression
+title: ""
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        不要在公开 Issue 中提交可利用漏洞、密钥、隐藏测试或真实用户代码。安全问题请遵循 `SECURITY.md`。
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: commit SHA or version
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, kernel, CPU architecture, KVM, Firecracker, kernel/rootfs/runtime versions where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Provide the smallest safe sequence and inputs needed to reproduce.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and bounded logs
+      description: Remove secrets, private source, hidden data, tokens, and host-sensitive paths.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact and related IDs
+      description: Include affected requirements, acceptance items, threats, or risks when known.

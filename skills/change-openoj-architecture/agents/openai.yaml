@@ -1,0 +1,4 @@
+interface:
+  display_name: "Change OpenOJ Architecture"
+  short_description: "Evolve OpenOJ architecture through governed decisions"
+  default_prompt: "Use $change-openoj-architecture to design a governed OpenOJ architecture change and its ADR."

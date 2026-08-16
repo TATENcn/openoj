@@ -1,0 +1,4 @@
+interface:
+  display_name: "Change OpenOJ Sandbox"
+  short_description: "Change Firecracker isolation with security evidence"
+  default_prompt: "Use $change-openoj-sandbox to modify OpenOJ isolation while preserving its threat controls."

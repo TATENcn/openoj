@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify OpenOJ"
+  short_description: "Audit OpenOJ changes against requirements and gates"
+  default_prompt: "Use $verify-openoj to independently verify an OpenOJ change and report evidence and gaps."

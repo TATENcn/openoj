@@ -1,0 +1,56 @@
+Phase 0 governance validation raw summary
+Date: 2026-08-16
+Revision: no commit; untracked working tree
+
+Environment
+Linux archlinux 7.1.8-zen1-3-zen #1 ZEN SMP PREEMPT_DYNAMIC Tue, 11 Aug 2026 09:59:01 +0000 x86_64 GNU/Linux
+OS: Arch Linux rolling
+CPU: 8 online vCPU, AMD Ryzen 9 9950X3D, VMware hypervisor, AMD-V exposed
+Memory: 15 GiB total
+Virtualization: container-other
+/dev/kvm: absent
+Python: 3.14.7
+PyYAML: 6.0.3 in /tmp/openoj-skill-validate
+ripgrep: 15.2.0
+
+Commands and results
+bash -n scripts/check-docs.sh
+PASS
+
+bash scripts/check-docs.sh
+Documentation and skill structure checks passed.
+
+for skill in skills/*; do
+  /tmp/openoj-skill-validate/bin/python <skill-creator>/scripts/quick_validate.py "$skill"
+done
+Skill is valid!
+Skill is valid!
+Skill is valid!
+Skill is valid!
+Skill is valid!
+
+YAML parse check
+Parsed 10 YAML files and 32 document frontmatters before the validation record was added.
+
+Forward tests
+change-openoj-architecture: PASS, stopped evidence-free microservice and broker expansion.
+evolve-openoj-protocol: PASS, stopped breaking attempt removal and fail-open Verdict behavior.
+change-openoj-sandbox: PASS, stopped shared writable state and default public network.
+develop-openoj: PASS, stopped requirement-free empty crates, TODOs, and direct main commit.
+verify-openoj: PASS, found acceptance mapping and frontmatter-reference gate defects.
+
+Final independent verification after three correction rounds
+ACC-F0-001: PASS
+ACC-F0-002: PASS
+ACC-F0-003: PASS
+ACC-F0-004: PASS
+ACC-F0-005: PASS
+ACC-F0-006: PASS
+Accepted requirement mappings: PASS
+Concrete ACC reference resolution: PASS
+
+Limitations
+No immutable commit revision.
+GitHub Actions not executed remotely.
+No automated negative fixture for the documentation gate.
+No KVM, Firecracker, runtime, product, performance, or production validation.

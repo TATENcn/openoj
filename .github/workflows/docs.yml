@@ -1,0 +1,17 @@
+name: Documentation governance
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: Documentation and skill structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate documentation governance
+        run: bash scripts/check-docs.sh

@@ -1,0 +1,53 @@
+name: Feature or change
+description: Propose a scoped product, engineering, or governance change
+title: ""
+labels:
+  - proposal
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先查找 `docs/requirements/`、相关 ADR 和已有 Issue。公共协议、安全边界、许可证或数据语义变化需要额外决策。
+  - type: input
+    id: refs
+    attributes:
+      label: Requirement and decision references
+      description: Stable requirement, acceptance, risk, ADR, or related Issue IDs.
+      placeholder: FR-JUDGE-001, ACC-P0-001
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: Describe the observable outcome, not only an implementation idea.
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: State what this change intentionally will not solve.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance and verification
+      description: List executable success, rejection, failure, cleanup, and evidence criteria.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Security, compatibility, data, operations, and license impact
+      description: Write none only after checking each category.
+    validations:
+      required: true
+  - type: textarea
+    id: autonomy
+    attributes:
+      label: Agent autonomy and human approvals
+      description: State what an Agent may decide and what requires explicit human approval.
+    validations:
+      required: true
