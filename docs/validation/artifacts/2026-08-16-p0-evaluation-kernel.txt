@@ -1,6 +1,8 @@
 OpenOJ P0-A evaluation kernel validation summary
 Date: 2026-08-16
-Revision: working tree on codex/p0-evaluation-kernel, based on f798729f3f89d37a8ed22e2fe652063a419029a6
+Feature revision: 5cfe15ac4e4be58c3b4cdff5cfbcae20480f285d
+Validated PR head: 16d4322b68832ed4381c84ec86421e269b4cbb8f on PR #1
+Base revision: f798729f3f89d37a8ed22e2fe652063a419029a6
 
 Environment
 - Arch Linux, Linux 7.1.8-zen1-3-zen, x86_64
@@ -44,8 +46,19 @@ Decision: full license enforcement is deferred during prototyping; it remains ma
 Command: git diff --check
 Result: exit 0
 
+GitHub Actions: Rust workspace, run 31950611636
+Event: pull_request
+Head: 16d4322b68832ed4381c84ec86421e269b4cbb8f
+Result: success; Rust workspace gates completed in 3m4s
+URL: https://github.com/TATENcn/openoj/actions/runs/31950611636
+
+GitHub Actions: Documentation governance, run 31950611654
+Event: pull_request
+Head: 16d4322b68832ed4381c84ec86421e269b4cbb8f
+Result: success; Documentation and skill structure completed in 20s
+URL: https://github.com/TATENcn/openoj/actions/runs/31950611654
+
 Not run / Unverified
-- GitHub Actions on this branch: branch has not been committed or pushed
 - License compatibility for formal distribution: blocked on human license/DCO/CLA decision
 - KVM, Firecracker, jailer, guest, runtime image, untrusted execution, host survival: not implemented; /dev/kvm absent
 - PostgreSQL, durable idempotency, HTTP/API, real cancellation races, audit persistence: not implemented

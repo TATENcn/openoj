@@ -1,8 +1,8 @@
 ---
-status: Implemented
+status: Validated
 owners: OpenOJ maintainers
 last_reviewed: 2026-08-16
-applies_to: P0-A evaluation kernel working tree
+applies_to: P0-A evaluation kernel commit 5cfe15ac4e4be58c3b4cdff5cfbcae20480f285d
 references:
   - README.md
   - ../protocol/v0alpha1.md
@@ -16,13 +16,13 @@ references:
 ## 范围与修订
 
 - 范围：`FR-SUBMISSION-001`、`FR-EVAL-001`、`FR-RESULT-001`、`FR-PROFILE-001` 的首个内存实现，以及 `ACC-P0-012`、`ACC-P0-013`、`ACC-P0-016` 的早期机械覆盖。
-- 修订：分支 `codex/p0-evaluation-kernel` 的未提交工作区，基于 `f798729f3f89d37a8ed22e2fe652063a419029a6`。建立不可变 commit 并通过远端 CI 前不得升级为 `Validated`。
+- 修订：功能 commit `5cfe15ac4e4be58c3b4cdff5cfbcae20480f285d`；远端验证针对 PR [#1](https://github.com/TATENcn/openoj/pull/1) head `16d4322b68832ed4381c84ec86421e269b4cbb8f`，包含同一功能 commit 及其 CI/治理提交，基于 `f798729f3f89d37a8ed22e2fe652063a419029a6`。
 - 环境：Arch Linux，Linux `7.1.8-zen1-3-zen`，x86_64，8 vCPU（AMD Ryzen 9 9950X3D，VMware full virtualization），15 GiB RAM；`/dev/kvm` 不存在。
 - 工具：Rust/Cargo 1.97.1、cargo-deny 0.20.2、Python 3.14.7、Bash、ripgrep。
 - 构建：debug 单元、集成和 conformance 测试；不包含 release 性能构建。
 - Firecracker/kernel/rootfs/guest agent/Runtime image：未实现、未运行、无摘要。
 - 输入：两个仓库自有最小 JSON fixture，无真实用户源码、秘密或受限制题目。
-- 原始摘要：`artifacts/2026-08-16-p0-evaluation-kernel.txt`，SHA-256 `8ad771ce470187c614186a58dd45566c41600f46a83cefdb9bb73baa13522c91`。
+- 原始摘要：`artifacts/2026-08-16-p0-evaluation-kernel.txt`，SHA-256 `90c4f6cdf7f00f7e9ab9905794a9650b2909430108a089fda5ea2d5a72651eb1`。
 
 ## 需求追踪
 
@@ -53,6 +53,11 @@ git diff --check
 
 测试共 16 项：application 单元测试 4 项、walking-skeleton 集成测试 1 项、domain 单元测试 6 项、protocol/conformance 测试 5 项，全部通过。
 
+GitHub-hosted `ubuntu-latest` 在同一 PR head 上通过：
+
+- [Rust workspace run 31950611636](https://github.com/TATENcn/openoj/actions/runs/31950611636)：`Rust workspace gates` 成功，包含固定工具链安装、format、check、Clippy、16 项测试、依赖方向和 cargo-deny 子门禁。
+- [Documentation run 31950611654](https://github.com/TATENcn/openoj/actions/runs/31950611654)：`Documentation and skill structure` 成功，并证明 runner 安装 `ripgrep` 后可执行仓库文档检查器。
+
 完整 `cargo deny --locked check` 失败：advisory、ban 和 source 通过，license 因仓库没有 Accepted 许可证允许列表而失败。维护者决定原型阶段暂不处理许可证允许列表，因此当前机械门禁只执行通过的三个子检查；完整 license gate 已预留，并继续阻塞正式发布和产物分发。
 
 ## 安全与兼容结论
@@ -66,7 +71,6 @@ git diff --check
 
 ## 未验证与阻塞
 
-- GitHub Actions：分支未提交、未推送，文档和 Rust workspace workflow 尚未在本分支远端运行。
 - 许可证：平台许可证、依赖允许列表、DCO/CLA 和正式分发权利等待人工决策。
 - KVM/Firecracker：当前环境无 `/dev/kvm`，且执行平面尚未实现。
 - 真实安全：无恶意 workload、宿主存活、资源回收、网络隔离、秘密隔离或 guest/host 协议证据。
