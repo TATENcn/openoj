@@ -3,6 +3,9 @@ name: Documentation governance
 on:
   push:
   pull_request:
+  merge_group:
+    types:
+      - checks_requested
 
 permissions:
   contents: read
@@ -13,5 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Install documentation checker dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
       - name: Validate documentation governance
         run: bash scripts/check-docs.sh

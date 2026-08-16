@@ -46,10 +46,13 @@ cargo fmt --all -- --check
 cargo check --workspace --all-targets --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
-cargo deny --locked check
+cargo deny --locked check advisories bans sources
+python3 scripts/check-workspace.py
 ```
 
 具体命令在工具链和 workspace 创建时由同一变更验证并更新。不得写入尚不存在或从未执行的“已通过”结果。
+
+原型阶段只机械阻断 advisory、禁用依赖和非允许来源。完整 `cargo deny --locked check` 的 license gate 已预留，但必须等平台许可证、允许依赖许可证和 DCO/CLA 策略成为 Accepted 后才能启用；在此之前仍禁止正式发布或分发产物。
 
 ## 附加验证
 

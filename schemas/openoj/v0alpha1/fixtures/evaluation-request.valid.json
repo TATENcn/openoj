@@ -1,0 +1,49 @@
+{
+  "message_type": "evaluation_request",
+  "schema_version": "openoj.evaluation/v0alpha1",
+  "request_id": "req_01",
+  "idempotency_key": "idem_01",
+  "evaluation_id": "eval_01",
+  "attempt_id": "attempt_01",
+  "attempt_number": 1,
+  "problem_version": {
+    "problem_id": "problem_01",
+    "problem_version_id": "problem_version_01",
+    "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "submission": {
+    "submission_id": "submission_01",
+    "source": {
+      "artifact_id": "artifact_source_01",
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "media_type": "text/x-c++src",
+      "size_bytes": 128,
+      "sensitivity": "private"
+    }
+  },
+  "runtime": {
+    "runtime_id": "runtime_cpp_01",
+    "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "plan": {
+    "profile": "algorithm_batch",
+    "stages": [
+      "prepare",
+      "build",
+      "run",
+      "check",
+      "aggregate"
+    ]
+  },
+  "policy": {
+    "cpu_time_ms": 1000,
+    "wall_time_ms": 2000,
+    "memory_bytes": 268435456,
+    "output_bytes": 1048576,
+    "process_limit": 64,
+    "network": "denied"
+  },
+  "required_capabilities": [
+    "algorithm.batch"
+  ]
+}
