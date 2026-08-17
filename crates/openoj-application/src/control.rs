@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, collections::BTreeSet};
 use openoj_domain::{
     AttemptId, AttemptState, Capability, ClaimOperationId, EvaluationId, EvaluationRequest,
     EvaluationResult, EvaluationState, IdempotencyKey, LeaseDuration, LeaseToken, NodeId,
-    UnixMillis,
+    ResultOperationId, UnixMillis,
 };
 
 /// P0-C control-plane policy for a lease and its server-scheduled renewal interval.
@@ -156,6 +156,16 @@ pub struct JudgeRenew {
 pub enum JudgeRenewDirective {
     Continue { expires_at: UnixMillis },
     Cancel,
+}
+
+/// Fully server-derived context for a P0-C result submission.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JudgeSubmitResult {
+    pub node_id: NodeId,
+    pub operation_id: ResultOperationId,
+    pub lease_token: LeaseToken,
+    pub result: EvaluationResult,
+    pub now: UnixMillis,
 }
 
 pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StoreError>> + Send + 'a>>;

@@ -1,5 +1,7 @@
-use openoj_application::{CancelEvaluation, EvaluationSnapshot, StoreError, SubmitResult};
-use openoj_domain::{EvaluationIdentity, EvaluationStatus};
+use openoj_application::{
+    CancelEvaluation, EvaluationSnapshot, JudgeSubmitResult, StoreError, SubmitResult,
+};
+use openoj_domain::{EvaluationIdentity, EvaluationStatus, IdempotencyKey};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 pub async fn submit_result(
@@ -105,6 +107,40 @@ pub async fn submit_result(
         .await
         .map_err(|_| StoreError::Unavailable)?;
     super::read::evaluation_status(pool, identity.evaluation_id().clone()).await
+}
+
+pub async fn judge_submit_result(
+    pool: &PgPool,
+    command: JudgeSubmitResult,
+) -> Result<EvaluationSnapshot, StoreError> {
+    if command.result.provenance().node_id() != Some(&command.node_id) {
+        return Err(StoreError::IdentityConflict);
+    }
+    let identity = command.result.identity();
+    let owner: Option<String> = sqlx::query_scalar(
+        "SELECT a.node_id FROM evaluations e \
+         JOIN evaluation_attempts a ON a.attempt_id = e.current_attempt_id \
+         WHERE e.evaluation_id = $1",
+    )
+    .bind(identity.evaluation_id().as_str())
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| StoreError::Unavailable)?;
+    if owner.as_deref() != Some(command.node_id.as_str()) {
+        return Err(StoreError::StaleLease);
+    }
+    let idempotency_key = IdempotencyKey::parse(command.operation_id.as_str())
+        .map_err(|_| StoreError::CorruptData)?;
+    submit_result(
+        pool,
+        SubmitResult {
+            idempotency_key,
+            lease_token: command.lease_token,
+            result: command.result,
+            now: command.now,
+        },
+    )
+    .await
 }
 
 fn map_terminal_error(error: &sqlx::Error) -> StoreError {
