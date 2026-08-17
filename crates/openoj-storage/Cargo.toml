@@ -12,6 +12,7 @@ openoj-protocol.workspace = true
 sqlx.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 sqlx = { workspace = true, features = ["macros"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

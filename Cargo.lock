@@ -969,6 +969,7 @@ dependencies = [
  "openoj-application",
  "openoj-domain",
  "openoj-protocol",
+ "serde_json",
  "sqlx",
  "tokio",
 ]
