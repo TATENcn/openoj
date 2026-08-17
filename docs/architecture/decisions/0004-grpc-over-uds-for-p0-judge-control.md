@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Accepted
 owners: OpenOJ maintainers
 last_reviewed: 2026-08-17
 applies_to: P0 control-plane to judge-node communication
@@ -72,4 +72,4 @@ P0-C 新增独立 RPC，不替换现有 CLI。数据库只通过新增前向 v2 
 - workspace fmt/check/Clippy/tests、依赖方向、文档、cargo-deny 和 dependency feature 审计通过。
 - TCP/mTLS、跨主机、Firecracker、用户代码、安全隔离和性能保持 `Unverified`。
 
-本 ADR 只有在维护者明确批准后才能从 `Proposed` 改为 `Accepted`。
+维护者已于 2026-08-17 批准本 ADR；后续改变 transport、节点身份或信任边界必须新增替代 ADR。

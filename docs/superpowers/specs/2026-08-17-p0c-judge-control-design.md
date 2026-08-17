@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Accepted
 owners: OpenOJ maintainers
 last_reviewed: 2026-08-17
 applies_to: P0-C judge control protocol and development worker loop
