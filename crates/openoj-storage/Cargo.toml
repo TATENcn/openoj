@@ -1,0 +1,19 @@
+[package]
+name = "openoj-storage"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+openoj-application.workspace = true
+openoj-domain.workspace = true
+openoj-protocol.workspace = true
+sqlx.workspace = true
+
+[dev-dependencies]
+sqlx = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

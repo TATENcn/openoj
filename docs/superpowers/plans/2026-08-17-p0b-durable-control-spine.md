@@ -130,9 +130,11 @@ pub trait EvaluationStore: Send + Sync {
 - [ ] **Step 3: Add exact pinned dependencies.**
 
 ```toml
-sqlx = { version = "=0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "migrate", "macros", "tls-rustls-ring-native-roots"] }
+sqlx = { version = "=0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "migrate", "tls-rustls-ring-native-roots"] }
 tokio = { version = "=1.53.1", default-features = false, features = ["macros", "rt-multi-thread"] }
 ```
+
+The storage test target additionally enables SQLx `macros` only for `#[sqlx::test]`; production migration embedding uses `include_str!` and `Migrator::with_migrations`.
 
 - [ ] **Step 4: Write the forward migration with immutable reference tables, `evaluations`, `evaluation_attempts`, `evaluation_tasks`, FK/unique constraints, state checks and byte/time/length checks from the design.**
 - [ ] **Step 5: Implement embedded migration and compatibility check; mutate the test schema version to 2 and assert `StoreError::IncompatibleSchema`, then restore/drop the isolated test database.**

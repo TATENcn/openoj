@@ -12,7 +12,7 @@ references:
 
 以下是首个垂直切片的目标布局；创建 workspace 时可以通过 ADR 调整名称，但不得破坏依赖方向。
 
-P0-A 当前只实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。未实现组件不创建空 crate；每增加一个 crate，都必须同时交付其边界行为和测试。
+P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0-B 增加 `openoj-storage`，首个切片负责 PostgreSQL migration、兼容检查、持久化 transaction 和可靠 task/outbox；未实现组件不创建空 crate，每增加一个 crate 都必须同时交付其边界行为和测试。
 
 ```text
 apps/
