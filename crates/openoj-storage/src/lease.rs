@@ -2,7 +2,7 @@ use openoj_application::{
     ClaimTask, EvaluationSnapshot, JudgeClaim, JudgeRenew, JudgeRenewDirective, RetryExpired,
     StoreError, TaskLease,
 };
-use openoj_domain::EvaluationRequest;
+use openoj_domain::{AttemptId, EvaluationRequest, UnixMillis};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 pub async fn claim_task(pool: &PgPool, command: ClaimTask) -> Result<TaskLease, StoreError> {
@@ -340,6 +340,67 @@ pub async fn retry_expired(
         .await
         .map_err(|_| StoreError::Unavailable)?;
     super::read::evaluation_status(pool, command.request.evaluation_id().clone()).await
+}
+
+/// Re-enqueues every leased evaluation whose current attempt has expired.
+///
+/// Each expired attempt is atomically replaced by a new queued attempt carrying the next attempt
+/// number and a fresh attempt id. A row that is no longer in an expired leased state (for
+/// example, because a concurrent recovery, a lease renewal, or a terminal write already won) is
+/// skipped rather than reported as an error.
+///
+/// # Errors
+///
+/// Returns a stable [`StoreError`] for persistence, decoding, or identity failures.
+pub async fn recover_expired(pool: &PgPool, now: UnixMillis) -> Result<u32, StoreError> {
+    let now_ms = i64::try_from(now.value()).map_err(|_| StoreError::InvalidTime)?;
+    let mut recovered = 0_u32;
+    loop {
+        let row = sqlx::query(
+            "SELECT e.evaluation_id, a.attempt_number, a.request_payload \
+             FROM evaluations e \
+             JOIN evaluation_attempts a ON a.attempt_id = e.current_attempt_id \
+             WHERE e.state = 'leased' AND a.state = 'leased' AND a.lease_expires_at_ms < $1 \
+             ORDER BY a.lease_expires_at_ms, a.attempt_id \
+             LIMIT 1",
+        )
+        .bind(now_ms)
+        .fetch_optional(pool)
+        .await
+        .map_err(|_| StoreError::Unavailable)?;
+        let Some(row) = row else { break };
+        let payload: Vec<u8> = row
+            .try_get("request_payload")
+            .map_err(|_| StoreError::CorruptData)?;
+        let current = openoj_protocol::decode_evaluation_request(&payload)
+            .map_err(|_| StoreError::CorruptData)?;
+        let next = current
+            .with_next_attempt(next_attempt_id()?, next_idempotency_key()?)
+            .map_err(|_| StoreError::CorruptData)?;
+        match retry_expired(pool, RetryExpired { now, request: next }).await {
+            Ok(_) => recovered = recovered.saturating_add(1),
+            Err(
+                StoreError::LeaseConflict
+                | StoreError::InvalidTransition
+                | StoreError::IdentityConflict,
+            ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(recovered)
+}
+
+fn next_attempt_id() -> Result<AttemptId, StoreError> {
+    let mut bytes = [0_u8; 24];
+    getrandom::fill(&mut bytes).map_err(|_| StoreError::Unavailable)?;
+    AttemptId::parse(format!("attempt_{}", hex::encode(bytes))).map_err(|_| StoreError::CorruptData)
+}
+
+fn next_idempotency_key() -> Result<openoj_domain::IdempotencyKey, StoreError> {
+    let mut bytes = [0_u8; 24];
+    getrandom::fill(&mut bytes).map_err(|_| StoreError::Unavailable)?;
+    openoj_domain::IdempotencyKey::parse(format!("idem_retry_{}", hex::encode(bytes)))
+        .map_err(|_| StoreError::CorruptData)
 }
 
 async fn replace_attempt(

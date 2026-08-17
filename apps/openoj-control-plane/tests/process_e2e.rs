@@ -215,6 +215,78 @@ fn judge_node_without_a_control_listener_fails_closed() -> Result<(), Box<dyn Er
     Ok(())
 }
 
+/// An expired leased evaluation (the state a crashed judge node leaves behind) is recovered
+/// by the control-plane sweeper into a new queued attempt and then completed by a fresh judge
+/// node, proving end-to-end expired-lease recovery (ACC-P0-003 / FR-SCHED-001).
+#[test]
+fn expired_lease_is_recovered_and_completed_by_a_new_judge_node() -> Result<(), Box<dyn Error>> {
+    let test_db = FreshDatabase::new()?;
+    let database_url = test_db.url().to_owned();
+    let directory = tempfile::tempdir()?;
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))?;
+    let socket_path = directory.path().join("judge-control.sock");
+    let request_path = directory.path().join("request.json");
+    let evaluation_id = unique_request(&request_path)?;
+    let attempt_id = format!("attempt_{}", evaluation_id.trim_start_matches("eval_"));
+    let root = workspace_root()?;
+
+    let mut control_plane = ChildGuard::spawn(
+        Command::new(env!("CARGO_BIN_EXE_openoj-control-plane"))
+            .env("OPENOJ_DATABASE_URL", &database_url)
+            .env("OPENOJ_JUDGE_CONTROL_SOCKET", &socket_path)
+            .env("OPENOJ_JUDGE_NODES", "judge_node_01:algorithm.batch")
+            .env("OPENOJ_LEASE_DURATION_MS", "1500")
+            .env("OPENOJ_RENEW_AFTER_MS", "500")
+            .env("OPENOJ_RECOVERY_INTERVAL_MS", "300")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )?;
+    wait_for_socket(&socket_path)?;
+
+    let submit = cargo_process(&root, "openoj-cli")
+        .env("OPENOJ_DATABASE_URL", &database_url)
+        .arg("submit")
+        .arg(&request_path)
+        .output()?;
+    if !submit.status.success() {
+        return Err(format!(
+            "CLI submit process failed: {}",
+            String::from_utf8_lossy(&submit.stderr)
+        )
+        .into());
+    }
+
+    // Simulate a judge node that claimed the task and then crashed: lease it in the past.
+    let past = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis())? - 1000;
+    run_psql_url(
+        &database_url,
+        &format!(
+            "UPDATE evaluations SET state='leased' WHERE evaluation_id='{evaluation_id}'; \
+             UPDATE evaluation_attempts SET state='leased', node_id='judge_node_dead', \
+                lease_token='lease_dead', lease_expires_at_ms={past} \
+                WHERE evaluation_id='{evaluation_id}' AND attempt_number=1; \
+             UPDATE evaluation_tasks SET state='leased' WHERE attempt_id='{attempt_id}';"
+        ),
+    )?;
+
+    // The sweeper must recover the expired lease into a new queued attempt (attempt 2).
+    wait_for_recovered_attempt(&root, &database_url, &evaluation_id)?;
+
+    // A fresh judge node claims and completes the recovered attempt.
+    let mut judge_node = ChildGuard::spawn(
+        cargo_process(&root, "openoj-judge-node")
+            .env("OPENOJ_JUDGE_CONTROL_SOCKET", &socket_path)
+            .env("OPENOJ_JUDGE_NODE_ID", "judge_node_01")
+            .env("OPENOJ_JUDGE_EXECUTOR", "development_mock")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )?;
+    wait_for_terminal_status(&root, &database_url, &evaluation_id)?;
+    judge_node.stop();
+    control_plane.stop();
+    Ok(())
+}
+
 /// A disposable per-test `PostgreSQL` database.
 ///
 /// The full workspace test suite runs process tests and `#[sqlx::test]` storage
@@ -286,6 +358,26 @@ fn run_psql(connection_head: &str, sql: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn run_psql_url(url: &str, sql: &str) -> Result<(), Box<dyn Error>> {
+    let rest = url.trim_start_matches("postgres://");
+    let (userinfo, hostport_database) = rest.split_once('@').ok_or("invalid connection url")?;
+    let (user, password) = userinfo.split_once(':').ok_or("invalid connection url")?;
+    let (hostport, database) = hostport_database
+        .split_once('/')
+        .ok_or("invalid connection url")?;
+    let (host, port) = hostport.rsplit_once(':').ok_or("invalid connection url")?;
+    let output = Command::new("psql")
+        .env("PGPASSWORD", password)
+        .args([
+            "-h", host, "-p", port, "-U", user, "-d", database, "-c", sql,
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Err(format!("psql failed: {}", String::from_utf8_lossy(&output.stderr)).into());
+    }
+    Ok(())
+}
+
 fn unique_request(path: &Path) -> Result<String, Box<dyn Error>> {
     let milliseconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
     let label = format!("p{}_{}", std::process::id(), milliseconds);
@@ -345,6 +437,30 @@ fn wait_for_terminal_status(
         thread::sleep(Duration::from_millis(100));
     }
     Err("judge-node did not produce a terminal development-mock result".into())
+}
+
+fn wait_for_recovered_attempt(
+    root: &Path,
+    database_url: &str,
+    evaluation_id: &str,
+) -> Result<(), Box<dyn Error>> {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        let status = cargo_process(root, "openoj-cli")
+            .env("OPENOJ_DATABASE_URL", database_url)
+            .arg("status")
+            .arg(evaluation_id)
+            .output()?;
+        let stdout = String::from_utf8(status.stdout)?;
+        if status.status.success()
+            && stdout.contains("attempt_number=2")
+            && stdout.contains("state=queued")
+        {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(150));
+    }
+    Err("control-plane sweeper did not recover the expired lease into attempt 2".into())
 }
 
 struct ChildGuard(Child);

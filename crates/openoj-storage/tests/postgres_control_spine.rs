@@ -902,3 +902,106 @@ async fn cancellation_and_completion_race_keeps_one_terminal_result(
     assert_eq!(terminal_rows, 1);
     Ok(())
 }
+
+#[sqlx::test(migrations = false)]
+async fn recover_expired_re_enqueues_an_expired_lease_with_a_new_attempt(
+    pool: PgPool,
+) -> Result<(), Box<dyn Error>> {
+    let store = PostgresEvaluationStore::from_pool(pool.clone());
+    store.migrate().await?;
+    let request = decode_evaluation_request(VALID_REQUEST)?;
+    let control = ControlPlane::new(store.clone());
+    control
+        .create_evaluation(CreateEvaluation {
+            request: request.clone(),
+            created_at: UnixMillis::new(4_000)?,
+        })
+        .await?;
+    let lease = control
+        .claim_task(ClaimTask {
+            node_id: NodeId::parse("node_01")?,
+            lease_token: LeaseToken::parse("lease_01")?,
+            now: UnixMillis::new(4_100)?,
+            lease_duration: LeaseDuration::new(1_000)?,
+        })
+        .await?;
+    assert_eq!(lease.request.evaluation_id(), request.evaluation_id());
+
+    // Before the lease expires nothing is recovered.
+    assert_eq!(store.recover_expired(UnixMillis::new(5_000)?).await?, 0);
+
+    // After the lease expires at 5100 the evaluation is atomically re-enqueued.
+    assert_eq!(store.recover_expired(UnixMillis::new(5_101)?).await?, 1);
+
+    let snapshot = control
+        .evaluation_status(request.evaluation_id().clone())
+        .await?;
+    assert_eq!(snapshot.state, EvaluationState::Queued);
+    assert_eq!(snapshot.attempt_number, 2);
+    assert_eq!(snapshot.attempt_state, AttemptState::Queued);
+
+    // A later sweep finds nothing further to recover.
+    assert_eq!(store.recover_expired(UnixMillis::new(5_102)?).await?, 0);
+
+    // Attempt history is preserved: the old lease is expired, the retry is queued.
+    let history: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT attempt_id, attempt_number, state FROM evaluation_attempts \
+         WHERE evaluation_id = $1 ORDER BY attempt_number",
+    )
+    .bind(request.evaluation_id().as_str())
+    .fetch_all(&pool)
+    .await?;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].1, 1);
+    assert_eq!(history[0].2, "expired");
+    assert_eq!(history[1].1, 2);
+    assert_eq!(history[1].2, "queued");
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn concurrent_recovery_recovers_an_expired_lease_exactly_once(
+    pool: PgPool,
+) -> Result<(), Box<dyn Error>> {
+    let store = PostgresEvaluationStore::from_pool(pool.clone());
+    store.migrate().await?;
+    let request = decode_evaluation_request(VALID_REQUEST)?;
+    let control = ControlPlane::new(store.clone());
+    control
+        .create_evaluation(CreateEvaluation {
+            request: request.clone(),
+            created_at: UnixMillis::new(4_000)?,
+        })
+        .await?;
+    control
+        .claim_task(ClaimTask {
+            node_id: NodeId::parse("node_01")?,
+            lease_token: LeaseToken::parse("lease_01")?,
+            now: UnixMillis::new(4_100)?,
+            lease_duration: LeaseDuration::new(1_000)?,
+        })
+        .await?;
+
+    let first = store.clone();
+    let second = store.clone();
+    let (a, b) = tokio::join!(
+        first.recover_expired(UnixMillis::new(5_101)?),
+        second.recover_expired(UnixMillis::new(5_101)?),
+    );
+    assert_eq!(a? + b?, 1);
+
+    // Only one retry attempt exists; no duplicate or third attempt was created.
+    let history: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT attempt_id, attempt_number, state FROM evaluation_attempts \
+         WHERE evaluation_id = $1 ORDER BY attempt_number",
+    )
+    .bind(request.evaluation_id().as_str())
+    .fetch_all(&pool)
+    .await?;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].1, 1);
+    assert_eq!(history[0].2, "expired");
+    assert_eq!(history[1].1, 2);
+    assert_eq!(history[1].2, "queued");
+    Ok(())
+}
