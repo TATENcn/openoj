@@ -1,8 +1,9 @@
 use std::error::Error;
 
 use openoj_application::{
-    CancelEvaluation, ClaimTask, ControlPlane, CreateEvaluation, Decision, JudgeClaim, LeasePolicy,
-    RetryExpired, StageContext, StageExecution, StageExecutor, StoreError, SubmitResult,
+    CancelEvaluation, ClaimTask, ControlPlane, CreateEvaluation, Decision, JudgeClaim, JudgeRenew,
+    JudgeRenewDirective, LeasePolicy, RetryExpired, StageContext, StageExecution, StageExecutor,
+    StoreError, SubmitResult,
 };
 use openoj_domain::{
     AttemptState, Capability, ClaimOperationId, EvaluationState, ExecutorKind, IdempotencyKey,
@@ -474,6 +475,47 @@ async fn judge_claim_dispatches_only_capability_compatible_tasks(
     );
     assert_eq!(lease.node_id.as_str(), "judge_node_01");
     assert_eq!(store.judge_claim_task(command).await?, lease);
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn judge_renew_uses_server_time_and_lease_policy(pool: PgPool) -> Result<(), Box<dyn Error>> {
+    let store = PostgresEvaluationStore::from_pool(pool);
+    store.migrate().await?;
+    let request = decode_evaluation_request(VALID_REQUEST)?;
+    ControlPlane::new(store.clone())
+        .create_evaluation(CreateEvaluation {
+            request: request.clone(),
+            created_at: UnixMillis::new(20_000)?,
+        })
+        .await?;
+    let policy = LeasePolicy::new(LeaseDuration::new(30_000)?, LeaseDuration::new(10_000)?)?;
+    let lease = store
+        .judge_claim_task(JudgeClaim {
+            node_id: NodeId::parse("judge_node_01")?,
+            declared_capabilities: vec![Capability::parse("algorithm.batch")?],
+            operation_id: ClaimOperationId::parse("claim_renew_01")?,
+            lease_token: LeaseToken::parse("lease_renew_01")?,
+            now: UnixMillis::new(21_000)?,
+            lease_policy: policy,
+        })
+        .await?;
+
+    assert_eq!(
+        store
+            .judge_renew_lease(JudgeRenew {
+                node_id: lease.node_id.clone(),
+                evaluation_id: request.evaluation_id().clone(),
+                attempt_id: request.attempt_id().clone(),
+                lease_token: lease.lease_token,
+                now: UnixMillis::new(22_000)?,
+                lease_policy: policy,
+            })
+            .await?,
+        JudgeRenewDirective::Continue {
+            expires_at: UnixMillis::new(52_000)?,
+        }
+    );
     Ok(())
 }
 

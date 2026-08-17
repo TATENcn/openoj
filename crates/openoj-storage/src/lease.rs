@@ -1,5 +1,6 @@
 use openoj_application::{
-    ClaimTask, EvaluationSnapshot, JudgeClaim, RetryExpired, StoreError, TaskLease,
+    ClaimTask, EvaluationSnapshot, JudgeClaim, JudgeRenew, JudgeRenewDirective, RetryExpired,
+    StoreError, TaskLease,
 };
 use openoj_domain::EvaluationRequest;
 use sqlx::{PgPool, Postgres, Row, Transaction};
@@ -80,6 +81,75 @@ async fn claim_replay(
         lease_token,
         expires_at,
     }))
+}
+
+pub async fn judge_renew_lease(
+    pool: &PgPool,
+    command: JudgeRenew,
+) -> Result<JudgeRenewDirective, StoreError> {
+    let expires_at = command
+        .now
+        .checked_add(command.lease_policy.lease_duration())
+        .map_err(|_| StoreError::InvalidTime)?;
+    let now = i64::try_from(command.now.value()).map_err(|_| StoreError::InvalidTime)?;
+    let expiry = i64::try_from(expires_at.value()).map_err(|_| StoreError::InvalidTime)?;
+    let mut transaction = pool.begin().await.map_err(|_| StoreError::Unavailable)?;
+    let row = sqlx::query(
+        "SELECT e.state AS evaluation_state, e.current_attempt_id, a.state AS attempt_state, \
+         a.node_id, a.lease_token FROM evaluations e \
+         JOIN evaluation_attempts a ON a.attempt_id = e.current_attempt_id \
+         WHERE e.evaluation_id = $1 FOR UPDATE OF e, a",
+    )
+    .bind(command.evaluation_id.as_str())
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| StoreError::Unavailable)?
+    .ok_or(StoreError::NotFound)?;
+    let evaluation_state: String = row
+        .try_get("evaluation_state")
+        .map_err(|_| StoreError::CorruptData)?;
+    let attempt_state: String = row
+        .try_get("attempt_state")
+        .map_err(|_| StoreError::CorruptData)?;
+    if evaluation_state == "cancelled" || attempt_state == "cancelled" {
+        transaction
+            .commit()
+            .await
+            .map_err(|_| StoreError::Unavailable)?;
+        return Ok(JudgeRenewDirective::Cancel);
+    }
+    let attempt_id: String = row
+        .try_get("current_attempt_id")
+        .map_err(|_| StoreError::CorruptData)?;
+    let node_id: String = row
+        .try_get("node_id")
+        .map_err(|_| StoreError::CorruptData)?;
+    let lease_token: String = row
+        .try_get("lease_token")
+        .map_err(|_| StoreError::CorruptData)?;
+    if evaluation_state != "leased"
+        || attempt_state != "leased"
+        || attempt_id != command.attempt_id.as_str()
+        || node_id != command.node_id.as_str()
+        || lease_token != command.lease_token.as_str()
+    {
+        return Err(StoreError::StaleLease);
+    }
+    sqlx::query(
+        "UPDATE evaluation_attempts SET lease_expires_at_ms = $2, updated_at_ms = $3 \
+         WHERE attempt_id = $1",
+    )
+    .bind(command.attempt_id.as_str())
+    .bind(expiry)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| StoreError::Unavailable)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| StoreError::Unavailable)?;
+    Ok(JudgeRenewDirective::Continue { expires_at })
 }
 
 async fn claim_task_with_capabilities(

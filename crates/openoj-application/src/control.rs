@@ -141,6 +141,23 @@ pub struct JudgeClaim {
     pub lease_policy: LeasePolicy,
 }
 
+/// Fully server-derived inputs for a P0-C Judge Control lease renewal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JudgeRenew {
+    pub node_id: NodeId,
+    pub evaluation_id: EvaluationId,
+    pub attempt_id: AttemptId,
+    pub lease_token: LeaseToken,
+    pub now: UnixMillis,
+    pub lease_policy: LeasePolicy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JudgeRenewDirective {
+    Continue { expires_at: UnixMillis },
+    Cancel,
+}
+
 pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StoreError>> + Send + 'a>>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -10,7 +10,7 @@ pub use migration::SUPPORTED_SCHEMA_VERSION;
 use openoj_application::StoreError;
 use openoj_application::{
     CancelEvaluation, ClaimTask, CreateEvaluation, EvaluationSnapshot, EvaluationStore, JudgeClaim,
-    RetryExpired, StoreFuture, SubmitResult, TaskLease,
+    JudgeRenew, JudgeRenewDirective, RetryExpired, StoreFuture, SubmitResult, TaskLease,
 };
 use openoj_domain::EvaluationId;
 use sqlx::PgPool;
@@ -80,6 +80,18 @@ impl PostgresEvaluationStore {
     /// Returns a stable [`StoreError`] for unavailable, corrupt, or unavailable task state.
     pub async fn judge_claim_task(&self, command: JudgeClaim) -> Result<TaskLease, StoreError> {
         lease::judge_claim_task(&self.pool, command).await
+    }
+
+    /// Extends or cancels a current P0-C lease using only control-plane time and policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable [`StoreError`] for stale ownership, terminal state, or persistence failure.
+    pub async fn judge_renew_lease(
+        &self,
+        command: JudgeRenew,
+    ) -> Result<JudgeRenewDirective, StoreError> {
+        lease::judge_renew_lease(&self.pool, command).await
     }
 
     /// Connects to `PostgreSQL` with an already validated bounded pool size.
