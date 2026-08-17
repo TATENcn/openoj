@@ -14,6 +14,28 @@ use openoj_application::{
 };
 use openoj_domain::EvaluationId;
 use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
+
+pub const MAX_DATABASE_POOL_SIZE: u32 = 64;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DatabasePoolSize(u32);
+
+impl DatabasePoolSize {
+    #[must_use]
+    pub const fn new(value: u32) -> Option<Self> {
+        if value >= 1 && value <= MAX_DATABASE_POOL_SIZE {
+            Some(Self(value))
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub const fn value(self) -> u32 {
+        self.0
+    }
+}
 
 #[derive(Clone)]
 pub struct PostgresEvaluationStore {
@@ -50,6 +72,23 @@ impl EvaluationStore for PostgresEvaluationStore {
 }
 
 impl PostgresEvaluationStore {
+    /// Connects to `PostgreSQL` with an already validated bounded pool size.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::Unavailable`] without exposing the connection string or `SQLx` source.
+    pub async fn connect(
+        database_url: &str,
+        pool_size: DatabasePoolSize,
+    ) -> Result<Self, StoreError> {
+        let pool = PgPoolOptions::new()
+            .max_connections(pool_size.value())
+            .connect(database_url)
+            .await
+            .map_err(|_| StoreError::Unavailable)?;
+        Ok(Self::from_pool(pool))
+    }
+
     #[must_use]
     pub const fn from_pool(pool: PgPool) -> Self {
         Self { pool }

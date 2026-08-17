@@ -947,6 +947,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "openoj-cli"
+version = "0.0.0"
+dependencies = [
+ "openoj-application",
+ "openoj-domain",
+ "openoj-protocol",
+ "openoj-storage",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "openoj-domain"
 version = "0.0.0"
 
