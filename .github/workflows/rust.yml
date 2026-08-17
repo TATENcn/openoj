@@ -20,6 +20,23 @@ jobs:
   rust:
     name: Rust workspace gates
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/openoj_test
+      OPENOJ_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/openoj_test
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: openoj_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d openoj_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
       - name: Install pinned Rust toolchain

@@ -32,7 +32,7 @@ flowchart LR
 
 负责 Problem、Problem Version、Submission、Evaluation、用户可见状态、策略、幂等 API、调度意图和审计。控制平面不直接执行不可信命令，也不持有 microVM 内部实现假设。
 
-P0 可以作为一个模块化 Rust 应用部署；只有获得真实扩展、故障域或独立发布需求后才拆分服务。
+P0 可以作为一个模块化 Rust 应用部署；只有获得真实扩展、故障域或独立发布需求后才拆分服务。当前 P0-B 已实现 PostgreSQL-backed application port 以及仅包含 migration、提交、状态查询的 CLI 进程组装；HTTP、身份认证和对象正文上传仍未实现。
 
 ## 评测编排
 
@@ -67,7 +67,7 @@ judge node 只接收执行所需的最小数据，不接收控制平面数据库
 - PostgreSQL 保存强一致领域状态、幂等键、租约、索引和审计元数据。
 - S3 兼容对象存储保存源码、测试数据、日志、报告、镜像元数据和其他大型 Artifact。
 - Artifact 以内容摘要寻址，敏感性、保留期和访问策略作为元数据管理。
-- P0 使用数据库可靠任务表/outbox；在证据表明确瓶颈前不引入独立消息系统。
+- P0 使用数据库可靠任务表/outbox；P0-B 已实现单项 `FOR UPDATE SKIP LOCKED` 领取、租约隔离、显式过期 Attempt 恢复和终态竞态保护，在证据表明确瓶颈前不引入独立消息系统。
 
 ## 关键不变量
 

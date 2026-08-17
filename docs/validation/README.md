@@ -22,3 +22,9 @@ references:
 - 结果、原始数据位置、摘要、异常和未验证项。
 
 设计目标不得写入此目录冒充结果。新证据不删除旧证据；过期记录标记替代关系和适用范围。
+
+## 记录索引
+
+- `2026-08-16-phase-0-governance.md`：Phase 0 文档与 Agent 治理基线。
+- `2026-08-16-p0-evaluation-kernel.md`：P0-A schema-first 内存评测内核。
+- `2026-08-17-p0b-durable-control-spine.md`：P0-B PostgreSQL 持久化控制脊柱。

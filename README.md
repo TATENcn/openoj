@@ -6,7 +6,7 @@ OpenOJ 的长期目标不是只提供传统 Online Judge 页面，而是建立�
 
 ## 当前状态
 
-项目已进入 **P0：单机算法题垂直切片** 的早期实现。当前仓库包含治理与架构基线，以及首个 schema-first 评测内核：它可以校验 `v0alpha1` 请求、维护不同领域身份、编排五个标准阶段，并通过明确标记为非生产的 mock executor 生成结构化结果。仓库尚不能执行用户代码，不具备 Firecracker、数据库、HTTP API 或可发布判题系统。
+项目已进入 **P0：单机算法题垂直切片** 的早期实现。当前仓库包含治理与架构基线、schema-first 评测内核，以及 PostgreSQL 持久化控制脊柱：它可以校验 `v0alpha1` 请求，原子创建 Evaluation/Attempt/可靠任务，按租约领取和显式恢复过期任务，并以幂等、租约隔离的事务提交结果或取消。最小 CLI 支持迁移、提交和状态查询。仓库尚不能执行用户代码，不具备 Firecracker、judge node、HTTP API、对象存储或可发布判题系统。
 
 在许可证决策被接受并添加正式 `LICENSE` 前，本仓库内容不得被视为已获得开源分发授权。参见[许可证治理](docs/governance/licensing.md)。
 

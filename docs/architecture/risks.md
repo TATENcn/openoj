@@ -21,6 +21,7 @@ references:
 | RISK-SUPPLY-001 | kernel、rootfs、编译器和依赖被投毒或许可证不兼容 | 摘要、来源、SBOM、签名、许可证门禁 | Open |
 | RISK-DATA-001 | 源码、隐藏测试和日志泄漏 | 分类、最小访问、脱敏、保留期和审计 | Open |
 | RISK-OPS-001 | KVM/网络/磁盘操作增加 judge node 运维复杂度 | 明确部署 Profile、节点排空、watchdog 和 runbook | Open |
+| RISK-DB-001 | migration、连接池或错误回滚导致控制状态不可用、版本不兼容或数据损坏 | 显式 migrate-before-start、schema 版本拒绝、有界连接池、事务测试、备份与非破坏回滚 runbook | Open |
 | RISK-AGENT-001 | Agent 根据模糊指令扩大范围或修改高风险策略 | 事实源、Skills、人工审批、Git 授权和停止条件 | Mitigated |
 | RISK-LEGAL-001 | 无许可证或第三方权利不清阻止开源/商业分发 | 发布阻塞、许可证 ADR、DCO/CLA 和内容权利分类 | Open |
 
