@@ -18,6 +18,7 @@ P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0
 apps/
   openoj-cli/               # 已实现
   openoj-control-plane/     # P0-C 进行中：UDS Judge Control server 组装
+  openoj-judge-node/        # P0-C 进行中：UDS client 与显式 development-mock worker 组装
 crates/
   openoj-domain/            # 已实现
   openoj-protocol/          # 已实现
@@ -36,7 +37,6 @@ guest/
 # 规划中的进程（尚未创建空 crate）
 apps/
   openoj-api/
-  openoj-judge-node/
 web/
 schemas/
 infra/

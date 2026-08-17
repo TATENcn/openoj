@@ -1,20 +1,20 @@
 [package]
-name = "openoj-judge-protocol"
+name = "openoj-judge-node"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
 
 [dependencies]
+getrandom.workspace = true
+hex.workspace = true
+openoj-application.workspace = true
 openoj-domain.workspace = true
+openoj-judge-core.workspace = true
+openoj-judge-protocol.workspace = true
 openoj-protocol.workspace = true
-prost.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tonic = { workspace = true, features = ["codegen", "transport"] }
-tonic-prost.workspace = true
-
-[build-dependencies]
-protoc-bin-vendored.workspace = true
-tonic-prost-build.workspace = true
 
 [lints]
 workspace = true

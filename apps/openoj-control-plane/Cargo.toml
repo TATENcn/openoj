@@ -6,10 +6,20 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-tokio = { workspace = true, features = ["fs", "net"] }
+openoj-application.workspace = true
+openoj-domain.workspace = true
+openoj-judge-protocol.workspace = true
+openoj-protocol.workspace = true
+openoj-storage.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+tokio = { workspace = true, features = ["fs", "macros", "net", "rt-multi-thread", "signal"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tonic = { workspace = true, features = ["codegen", "router", "transport"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = "=3.27.0"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 
 [lints]
 workspace = true

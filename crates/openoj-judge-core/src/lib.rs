@@ -44,6 +44,31 @@ pub trait JudgeControlClient {
     ) -> Result<(), StoreError>;
 }
 
+/// Async transport-neutral control operations for a Judge Node process.
+pub trait AsyncJudgeControlClient: Send {
+    /// Claims at most one task for a stable operation identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable control-plane error when the claim cannot be completed.
+    fn claim(
+        &mut self,
+        operation_id: ClaimOperationId,
+    ) -> impl Future<Output = Result<WorkerClaim, StoreError>> + Send;
+
+    /// Submits the result associated with a previously claimed lease.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable control-plane error when the result cannot be committed.
+    fn submit(
+        &mut self,
+        lease: &TaskLease,
+        operation_id: ResultOperationId,
+        result: EvaluationResult,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorkerClaim {
     Lease(Box<TaskLease>),
@@ -85,6 +110,29 @@ impl<E: JudgeExecutor> Worker<E> {
             WorkerClaim::Lease(lease) => {
                 let result = self.executor.execute(&lease.request)?;
                 client.submit(&lease, result_operation_id, result)?;
+                Ok(WorkerOutcome::Submitted)
+            }
+        }
+    }
+}
+
+impl<E: JudgeExecutor + Send> Worker<E> {
+    /// Claims, executes, and submits at most one task using an async control transport.
+    ///
+    /// # Errors
+    ///
+    /// Returns the stable control or execution error without attempting a second claim.
+    pub async fn run_once_async<C: AsyncJudgeControlClient>(
+        &mut self,
+        client: &mut C,
+        claim_operation_id: ClaimOperationId,
+        result_operation_id: ResultOperationId,
+    ) -> Result<WorkerOutcome, WorkerError> {
+        match client.claim(claim_operation_id).await? {
+            WorkerClaim::NoTask => Ok(WorkerOutcome::NoTask),
+            WorkerClaim::Lease(lease) => {
+                let result = self.executor.execute(&lease.request)?;
+                client.submit(&lease, result_operation_id, result).await?;
                 Ok(WorkerOutcome::Submitted)
             }
         }

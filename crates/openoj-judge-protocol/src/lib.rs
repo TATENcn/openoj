@@ -7,6 +7,12 @@ use std::fmt::{self, Display, Formatter};
 use openoj_domain::Capability;
 use openoj_protocol::{MAX_EVALUATION_REQUEST_BYTES, decode_evaluation_request};
 
+#[allow(
+    clippy::default_trait_access,
+    clippy::doc_markdown,
+    clippy::missing_errors_doc,
+    clippy::too_many_lines
+)]
 pub mod wire {
     tonic::include_proto!("openoj.judge.control.v0alpha1");
 }
@@ -78,7 +84,7 @@ pub fn validate_capabilities(
     Ok(parsed)
 }
 
-/// Validates a bounded canonical EvaluationRequest carried by a Judge Control message.
+/// Validates a bounded canonical `EvaluationRequest` carried by a Judge Control message.
 ///
 /// # Errors
 ///

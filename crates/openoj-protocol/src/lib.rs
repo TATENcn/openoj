@@ -4,10 +4,12 @@ use std::sync::OnceLock;
 
 use openoj_domain::{
     ArtifactId, ArtifactRef, ArtifactSensitivity, AttemptId, Capability, ContentDigest, Diagnostic,
-    DomainError, EvaluationId, EvaluationPlan, EvaluationRequest, EvaluationRequestParts,
-    EvaluationResult, EvidenceRef, IdempotencyKey, MediaType, NetworkPolicy, ProblemId,
-    ProblemVersionId, ProblemVersionRef, RequestId, ResourcePolicy, ResourceUsage, RuntimeId,
-    RuntimeRef, StageKind, SubmissionId, SubmissionRef,
+    DiagnosticCode, DomainError, EvaluationId, EvaluationIdentity, EvaluationPlan,
+    EvaluationRequest, EvaluationRequestParts, EvaluationResult, EvaluationResultParts,
+    EvaluationStatus, EvidenceId, EvidenceKind, EvidenceRef, ExecutionProvenance, ExecutorKind,
+    IdempotencyKey, MediaType, NetworkPolicy, NodeId, ProblemId, ProblemVersionId,
+    ProblemVersionRef, RequestId, ResourcePolicy, ResourceUsage, RuntimeId, RuntimeRef, Score,
+    StageKind, StageReport, StageStatus, SubmissionId, SubmissionRef, Verdict,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -117,6 +119,18 @@ pub fn decode_evaluation_result(input: &[u8]) -> Result<wire::EvaluationResult, 
     validate(&value)?;
     validate_result_semantics(&value)?;
     Ok(result)
+}
+
+/// Decodes a bounded canonical result into a domain value after schema and semantic validation.
+///
+/// # Errors
+///
+/// Returns [`ProtocolError`] for oversized, malformed, schema-invalid, semantic-invalid, or
+/// domain-invalid result data.
+pub fn decode_evaluation_result_domain(input: &[u8]) -> Result<EvaluationResult, ProtocolError> {
+    let result = decode_evaluation_result(input)?;
+    let value = serde_json::to_value(result).map_err(|_| ProtocolError::EncodingFailed)?;
+    result_from_value(&value)
 }
 
 /// Encodes a validated domain result through the generated canonical wire type.
@@ -504,6 +518,161 @@ fn result_to_value(result: &EvaluationResult) -> Value {
     })
 }
 
+fn result_from_value(value: &Value) -> Result<EvaluationResult, ProtocolError> {
+    let object = as_object(value)?;
+    let score = as_object(field(object, "score")?)?;
+    let provenance = as_object(field(object, "provenance")?)?;
+    let identity = EvaluationIdentity::new(
+        RequestId::parse(string_field(object, "request_id")?)?,
+        EvaluationId::parse(string_field(object, "evaluation_id")?)?,
+        AttemptId::parse(string_field(object, "attempt_id")?)?,
+        ProblemVersionId::parse(string_field(object, "problem_version_id")?)?,
+        SubmissionId::parse(string_field(object, "submission_id")?)?,
+        RuntimeId::parse(string_field(object, "runtime_id")?)?,
+        ContentDigest::parse(string_field(provenance, "runtime_digest")?)?,
+    );
+    let stages = as_array(field(object, "stages")?)?
+        .iter()
+        .map(stage_report_from_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    let diagnostics = as_array(field(object, "diagnostics")?)?
+        .iter()
+        .map(diagnostic_from_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    let evidence = as_array(field(object, "evidence")?)?
+        .iter()
+        .map(evidence_from_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    let production_eligible = field(provenance, "production_eligible")?
+        .as_bool()
+        .ok_or(ProtocolError::SchemaViolation)?;
+    let node_id = provenance
+        .get("node_id")
+        .map(|value| NodeId::parse(as_str(value)?).map_err(ProtocolError::from))
+        .transpose()?;
+    EvaluationResult::new(EvaluationResultParts {
+        identity,
+        status: evaluation_status_from_value(string_field(object, "status")?)?,
+        verdict: verdict_from_value(string_field(object, "verdict")?)?,
+        score: Score::new(
+            u32::try_from(u64_field(score, "earned")?)
+                .map_err(|_| ProtocolError::SchemaViolation)?,
+            u32::try_from(u64_field(score, "possible")?)
+                .map_err(|_| ProtocolError::SchemaViolation)?,
+        )?,
+        stages,
+        usage: usage_from_value(field(object, "usage")?)?,
+        diagnostics,
+        evidence,
+        provenance: ExecutionProvenance::new(
+            executor_kind_from_value(string_field(provenance, "executor_kind")?)?,
+            production_eligible,
+            ContentDigest::parse(string_field(provenance, "runtime_digest")?)?,
+            node_id,
+        )?,
+    })
+    .map_err(ProtocolError::from)
+}
+
+fn stage_report_from_value(value: &Value) -> Result<StageReport, ProtocolError> {
+    let object = as_object(value)?;
+    let diagnostics = as_array(field(object, "diagnostics")?)?
+        .iter()
+        .map(diagnostic_from_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    let evidence = as_array(field(object, "evidence")?)?
+        .iter()
+        .map(evidence_from_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    StageReport::new(
+        stage_kind_from_value(field(object, "stage")?)?,
+        stage_status_from_value(string_field(object, "status")?)?,
+        usage_from_value(field(object, "usage")?)?,
+        diagnostics,
+        evidence,
+    )
+    .map_err(ProtocolError::from)
+}
+
+fn usage_from_value(value: &Value) -> Result<ResourceUsage, ProtocolError> {
+    let object = as_object(value)?;
+    ResourceUsage::new(
+        u64_field(object, "cpu_time_ms")?,
+        u64_field(object, "wall_time_ms")?,
+        u64_field(object, "memory_peak_bytes")?,
+        u64_field(object, "output_bytes")?,
+    )
+    .map_err(ProtocolError::from)
+}
+
+fn diagnostic_from_value(value: &Value) -> Result<Diagnostic, ProtocolError> {
+    let object = as_object(value)?;
+    let truncated = field(object, "truncated")?
+        .as_bool()
+        .ok_or(ProtocolError::SchemaViolation)?;
+    Diagnostic::new(
+        DiagnosticCode::parse(string_field(object, "code")?)?,
+        string_field(object, "message")?,
+        truncated,
+    )
+    .map_err(ProtocolError::from)
+}
+
+fn evidence_from_value(value: &Value) -> Result<EvidenceRef, ProtocolError> {
+    let object = as_object(value)?;
+    let artifact = object
+        .get("artifact")
+        .map(artifact_from_value)
+        .transpose()?;
+    Ok(EvidenceRef::new(
+        EvidenceId::parse(string_field(object, "evidence_id")?)?,
+        EvidenceKind::parse(string_field(object, "kind")?)?,
+        artifact,
+    ))
+}
+
+fn stage_status_from_value(value: &str) -> Result<StageStatus, ProtocolError> {
+    match value {
+        "succeeded" => Ok(StageStatus::Succeeded),
+        "failed" => Ok(StageStatus::Failed),
+        "cancelled" => Ok(StageStatus::Cancelled),
+        "skipped" => Ok(StageStatus::Skipped),
+        _ => Err(ProtocolError::SchemaViolation),
+    }
+}
+
+fn evaluation_status_from_value(value: &str) -> Result<EvaluationStatus, ProtocolError> {
+    match value {
+        "completed" => Ok(EvaluationStatus::Completed),
+        "failed" => Ok(EvaluationStatus::Failed),
+        "cancelled" => Ok(EvaluationStatus::Cancelled),
+        _ => Err(ProtocolError::SchemaViolation),
+    }
+}
+
+fn verdict_from_value(value: &str) -> Result<Verdict, ProtocolError> {
+    match value {
+        "accepted" => Ok(Verdict::Accepted),
+        "wrong_answer" => Ok(Verdict::WrongAnswer),
+        "compile_error" => Ok(Verdict::CompileError),
+        "runtime_error" => Ok(Verdict::RuntimeError),
+        "time_limit_exceeded" => Ok(Verdict::TimeLimitExceeded),
+        "memory_limit_exceeded" => Ok(Verdict::MemoryLimitExceeded),
+        "output_limit_exceeded" => Ok(Verdict::OutputLimitExceeded),
+        "system_error" => Ok(Verdict::SystemError),
+        "cancelled" => Ok(Verdict::Cancelled),
+        _ => Err(ProtocolError::SchemaViolation),
+    }
+}
+
+fn executor_kind_from_value(value: &str) -> Result<ExecutorKind, ProtocolError> {
+    match value {
+        "development_mock" => Ok(ExecutorKind::DevelopmentMock),
+        "firecracker" => Ok(ExecutorKind::Firecracker),
+        _ => Err(ProtocolError::SchemaViolation),
+    }
+}
+
 fn provenance_to_value(provenance: &openoj_domain::ExecutionProvenance) -> Value {
     let mut value = json!({
         "executor_kind": provenance.executor_kind().as_str(),
@@ -612,7 +781,7 @@ mod tests {
 
     use super::{
         MAX_EVALUATION_REQUEST_BYTES, ProtocolError, SCHEMA_JSON, decode_evaluation_request,
-        decode_evaluation_result, encode_evaluation_request,
+        decode_evaluation_result, decode_evaluation_result_domain, encode_evaluation_request,
     };
 
     const VALID_REQUEST: &[u8] =
@@ -707,6 +876,17 @@ mod tests {
             decode_evaluation_result(&serde_json::to_vec(&forged_usage)?),
             Err(ProtocolError::SemanticViolation)
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn valid_result_round_trips_through_domain() -> Result<(), Box<dyn Error>> {
+        let domain = decode_evaluation_result_domain(VALID_RESULT)?;
+        assert_eq!(domain.identity().evaluation_id().as_str(), "eval_01");
+        assert_eq!(
+            domain.provenance().executor_kind().as_str(),
+            "development_mock"
+        );
         Ok(())
     }
 }

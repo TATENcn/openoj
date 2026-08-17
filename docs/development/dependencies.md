@@ -45,10 +45,12 @@ SQLx migration SQL 由 `include_str!` 嵌入，并由 `Migrator::with_migrations
 
 | 依赖 | 固定版本 | 用途与 feature | 来源与维护状态 | 许可证 | 替代与移除成本 |
 |---|---:|---|---|---|---|
-| `tonic` | 0.14.6 | 关闭 default feature，仅在 protocol crate 启用 `codegen`；后续 app 按需最小启用 UDS client/server transport，不启用 TLS、压缩或 router | crates.io，hyperium/tonic 官方仓库，当前维护；MSRV 1.88 | MIT | 内部 RPC adapter 隔离替换面；替换需要重新生成 client/server 与过程测试，成本中等 |
+| `tonic` | 0.14.6 | 关闭 default feature；protocol crate 启用 `codegen`，P0-C UDS app 启用最小 client/server transport，control-plane 为 service router 额外启用 `router`；不启用 TLS、压缩 | crates.io，hyperium/tonic 官方仓库，当前维护；MSRV 1.88 | MIT | 内部 RPC adapter 隔离替换面；替换需要重新生成 client/server 与过程测试，成本中等 |
 | `tonic-prost` | 0.14.6 | Tonic 0.14 生成代码的 Prost codec runtime；不单独暴露 transport | crates.io，随 Tonic 官方仓库维护；MSRV 1.88 | MIT | 由 Tonic 生成器耦合；移除需要替换生成链 |
 | `prost` | 0.14.4 | 关闭 default feature 后仅启用 `derive`、`std`，承载 Protobuf message binding | crates.io，tokio-rs/prost 官方仓库，当前维护；MSRV 1.85 | Apache-2.0 | 生成绑定依赖；替换需要重建 wire generator 与 compatibility suite |
 | `tonic-prost-build` | 0.14.6 | build dependency，关闭 default feature，生成 client/server 与 descriptor；不进入 runtime feature 图 | crates.io，随 Tonic 官方仓库维护；MSRV 1.88 | MIT | build-only；替换需要验证 descriptor 与所有生成 consumer |
 | `protoc-bin-vendored` | 3.2.0 | build dependency，按 host 选择随 crate 发布的 protoc；通过 `prost_build::Config::protoc_executable` 调用，不修改进程环境 | crates.io，stepancheg/protoc-bin-vendored 官方仓库，维护状态以 release 为准 | MIT | 避免系统 protoc 漂移；替换需在每个 CI host 验证 descriptor 可复现 |
+| `getrandom` | 0.3.4 | 仅 control-plane 和 judge-node 从操作系统 CSPRNG 生成租约令牌与 operation ID；随机源不可用时 fail closed | crates.io，rust-random 官方仓库，当前维护；MSRV 1.63 | MIT OR Apache-2.0 | 防止可预测租约/重放标识；替换必须重新审查随机源和失败语义 |
+| `hex` | 0.4.3 | 将随机字节编码为受 opaque-ID 字母表约束的令牌 | crates.io，dtolnay/hex 官方仓库，维护状态以 release 为准 | MIT OR Apache-2.0 | 小型纯编码依赖；可由受测内部编码替换 |
 
-`tonic-prost-build` 与 `protoc-bin-vendored` 仅由 build script 使用，最终 runtime 不包含 protoc。P0-C 当前不启用 Tonic 的 `transport`、TLS、gzip、deflate、zstd 或 router feature，因此尚未创建任何 TCP listener。`Cargo.lock` 固定 vendored protoc 的已支持平台包；它们的来源、摘要和 advisory/bans/sources 检查继续由 lockfile 与 cargo-deny 门禁记录。完整许可证批准仍按本文既有发布阻塞规则执行。
+`tonic-prost-build` 与 `protoc-bin-vendored` 仅由 build script 使用，最终 runtime 不包含 protoc。P0-C 仅为 UDS client/server 启用 Tonic transport；`router` 只用于组装 gRPC service，代码没有 TCP listener。TLS、gzip、deflate、zstd 均未启用。`Cargo.lock` 固定 vendored protoc 的已支持平台包；它们的来源、摘要和 advisory/bans/sources 检查继续由 lockfile 与 cargo-deny 门禁记录。完整许可证批准仍按本文既有发布阻塞规则执行。

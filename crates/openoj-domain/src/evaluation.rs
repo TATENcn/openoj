@@ -897,6 +897,28 @@ pub struct EvaluationIdentity {
 }
 
 impl EvaluationIdentity {
+    /// Creates the immutable identity carried by a canonical evaluation result.
+    #[must_use]
+    pub const fn new(
+        request_id: RequestId,
+        evaluation_id: EvaluationId,
+        attempt_id: AttemptId,
+        problem_version_id: ProblemVersionId,
+        submission_id: SubmissionId,
+        runtime_id: RuntimeId,
+        runtime_digest: ContentDigest,
+    ) -> Self {
+        Self {
+            request_id,
+            evaluation_id,
+            attempt_id,
+            problem_version_id,
+            submission_id,
+            runtime_id,
+            runtime_digest,
+        }
+    }
+
     #[must_use]
     pub fn from_request(request: &EvaluationRequest) -> Self {
         Self {

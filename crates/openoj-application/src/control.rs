@@ -105,6 +105,20 @@ impl NodePolicy {
         }
         Ok(())
     }
+
+    /// Authorizes an already negotiated node identity for lease-bound operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NodePolicyError::IdentityDenied`] for every node absent from the deployment
+    /// allowlist.
+    pub fn authorize_identity(&self, node_id: &NodeId) -> Result<(), NodePolicyError> {
+        if self.allowed.contains_key(node_id) {
+            Ok(())
+        } else {
+            Err(NodePolicyError::IdentityDenied)
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
