@@ -5,16 +5,25 @@ use sqlx::PgPool;
 use sqlx::SqlSafeStr;
 use sqlx::migrate::{Migration, MigrationType, Migrator};
 
-pub const SUPPORTED_SCHEMA_VERSION: i32 = 1;
+pub const SUPPORTED_SCHEMA_VERSION: i32 = 2;
 
 static MIGRATOR: LazyLock<Migrator> = LazyLock::new(|| {
-    Migrator::with_migrations(vec![Migration::new(
-        202_608_170_001,
-        "p0b control spine".into(),
-        MigrationType::Simple,
-        include_str!("../migrations/202608170001_p0b_control_spine.sql").into_sql_str(),
-        false,
-    )])
+    Migrator::with_migrations(vec![
+        Migration::new(
+            202_608_170_001,
+            "p0b control spine".into(),
+            MigrationType::Simple,
+            include_str!("../migrations/202608170001_p0b_control_spine.sql").into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            202_608_170_002,
+            "p0c judge control".into(),
+            MigrationType::Simple,
+            include_str!("../migrations/202608170002_p0c_judge_control.sql").into_sql_str(),
+            false,
+        ),
+    ])
 });
 
 pub async fn run(pool: &PgPool) -> Result<(), StoreError> {

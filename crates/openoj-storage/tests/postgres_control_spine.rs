@@ -96,7 +96,7 @@ async fn migration_is_repeatable_and_rejects_a_newer_schema(
         sqlx::query_scalar("SELECT schema_version FROM openoj_schema_metadata WHERE singleton")
             .fetch_one(&pool)
             .await?;
-    assert_eq!(schema_version, 1);
+    assert_eq!(schema_version, 2);
     store.check_compatibility().await?;
 
     let maximum_media_type = format!("{}/{}", "a".repeat(64), "b".repeat(64));
@@ -113,7 +113,7 @@ async fn migration_is_repeatable_and_rejects_a_newer_schema(
     .execute(&pool)
     .await?;
 
-    sqlx::query("UPDATE openoj_schema_metadata SET schema_version = 2 WHERE singleton")
+    sqlx::query("UPDATE openoj_schema_metadata SET schema_version = 3 WHERE singleton")
         .execute(&pool)
         .await?;
     assert_eq!(
@@ -157,6 +157,13 @@ async fn create_is_atomic_and_same_payload_replay_is_idempotent(
         .fetch_one(&pool)
         .await?;
     assert_eq!((evaluations, attempts, tasks), (1, 1, 1));
+    let required_capabilities: Vec<String> = sqlx::query_scalar(
+        "SELECT required_capabilities FROM evaluation_tasks WHERE attempt_id = $1",
+    )
+    .bind(request.attempt_id().as_str())
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(required_capabilities, vec!["algorithm.batch"]);
     Ok(())
 }
 

@@ -234,15 +234,7 @@ async fn replace_attempt(
     .execute(&mut **transaction)
     .await
     .map_err(|error| map_retry_insert_error(&error))?;
-    sqlx::query(
-        "INSERT INTO evaluation_tasks (attempt_id, state, created_at_ms, updated_at_ms) \
-         VALUES ($1, 'ready', $2, $2)",
-    )
-    .bind(request.attempt_id().as_str())
-    .bind(now)
-    .execute(&mut **transaction)
-    .await
-    .map_err(|error| map_retry_insert_error(&error))?;
+    super::create::insert_task(transaction, request, now).await?;
     Ok(())
 }
 

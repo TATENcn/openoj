@@ -55,21 +55,37 @@ pub async fn create_evaluation(
         created_at,
     )
     .await?;
-    sqlx::query(
-        "INSERT INTO evaluation_tasks (attempt_id, state, created_at_ms, updated_at_ms) \
-         VALUES ($1, 'ready', $2, $2)",
-    )
-    .bind(command.request.attempt_id().as_str())
-    .bind(created_at)
-    .execute(&mut *transaction)
-    .await
-    .map_err(|error| map_insert_error(&error))?;
+    insert_task(&mut transaction, &command.request, created_at).await?;
 
     transaction
         .commit()
         .await
         .map_err(|_| StoreError::Unavailable)?;
     super::read::evaluation_status(pool, command.request.evaluation_id().clone()).await
+}
+
+pub(crate) async fn insert_task(
+    transaction: &mut Transaction<'_, Postgres>,
+    request: &EvaluationRequest,
+    created_at: i64,
+) -> Result<(), StoreError> {
+    let capabilities = request
+        .required_capabilities()
+        .iter()
+        .map(openoj_domain::Capability::as_str)
+        .collect::<Vec<_>>();
+    sqlx::query(
+        "INSERT INTO evaluation_tasks \
+         (attempt_id, state, required_capabilities, created_at_ms, updated_at_ms) \
+         VALUES ($1, 'ready', $2, $3, $3)",
+    )
+    .bind(request.attempt_id().as_str())
+    .bind(capabilities)
+    .bind(created_at)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| map_insert_error(&error))?;
+    Ok(())
 }
 
 async fn register_artifact(
