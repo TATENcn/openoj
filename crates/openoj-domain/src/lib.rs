@@ -22,8 +22,9 @@ pub use evaluation::{
     RuntimeRef, Score, StageKind, StageReport, StageStatus, SubmissionRef, Verdict,
 };
 pub use value::{
-    ArtifactId, AttemptId, Capability, ContentDigest, DiagnosticCode, EvaluationId, EvidenceId,
-    EvidenceKind, IdempotencyKey, LeaseToken, MAX_CAPABILITY_LENGTH, MAX_DIAGNOSTIC_CODE_LENGTH,
-    MAX_EVIDENCE_KIND_LENGTH, MAX_IDEMPOTENCY_KEY_LENGTH, MAX_OPAQUE_ID_LENGTH, NodeId, ProblemId,
-    ProblemVersionId, RequestId, RuntimeId, SubmissionId,
+    ArtifactId, AttemptId, Capability, ClaimOperationId, ContentDigest, DiagnosticCode,
+    EvaluationId, EvidenceId, EvidenceKind, IdempotencyKey, LeaseToken, MAX_CAPABILITY_LENGTH,
+    MAX_DIAGNOSTIC_CODE_LENGTH, MAX_EVIDENCE_KIND_LENGTH, MAX_IDEMPOTENCY_KEY_LENGTH,
+    MAX_OPAQUE_ID_LENGTH, NodeId, ProblemId, ProblemVersionId, RequestId, ResultOperationId,
+    RuntimeId, SubmissionId,
 };
