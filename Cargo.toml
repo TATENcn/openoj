@@ -4,6 +4,7 @@ members = [
     "apps/openoj-cli",
     "crates/openoj-application",
     "crates/openoj-domain",
+    "crates/openoj-judge-core",
     "crates/openoj-judge-protocol",
     "crates/openoj-protocol",
     "crates/openoj-storage",
@@ -17,6 +18,7 @@ rust-version = "1.97"
 jsonschema = { version = "=0.49.9", default-features = false }
 openoj-application = { path = "crates/openoj-application" }
 openoj-domain = { path = "crates/openoj-domain" }
+openoj-judge-core = { path = "crates/openoj-judge-core" }
 openoj-judge-protocol = { path = "crates/openoj-judge-protocol" }
 openoj-protocol = { path = "crates/openoj-protocol" }
 openoj-storage = { path = "crates/openoj-storage" }

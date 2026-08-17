@@ -1071,6 +1071,15 @@ name = "openoj-domain"
 version = "0.0.0"
 
 [[package]]
+name = "openoj-judge-core"
+version = "0.0.0"
+dependencies = [
+ "openoj-application",
+ "openoj-domain",
+ "openoj-protocol",
+]
+
+[[package]]
 name = "openoj-judge-protocol"
 version = "0.0.0"
 dependencies = [

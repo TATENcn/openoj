@@ -18,6 +18,11 @@ ALLOWED_WORKSPACE_EDGES = {
         ("openoj-storage", "normal"),
     },
     "openoj-domain": set(),
+    "openoj-judge-core": {
+        ("openoj-application", "normal"),
+        ("openoj-domain", "normal"),
+        ("openoj-protocol", "dev"),
+    },
     "openoj-judge-protocol": {
         ("openoj-domain", "normal"),
         ("openoj-protocol", "normal"),
