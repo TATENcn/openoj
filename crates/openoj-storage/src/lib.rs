@@ -9,8 +9,9 @@ pub use migration::SUPPORTED_SCHEMA_VERSION;
 
 use openoj_application::StoreError;
 use openoj_application::{
-    CancelEvaluation, ClaimTask, CreateEvaluation, EvaluationSnapshot, EvaluationStore,
-    RetryExpired, StoreFuture, SubmitResult, TaskLease,
+    CancelEvaluation, ClaimTask, CreateEvaluation, EvaluationSnapshot, EvaluationStore, JudgeClaim,
+    JudgeRenew, JudgeRenewDirective, JudgeSubmitResult, RetryExpired, StoreFuture, SubmitResult,
+    TaskLease,
 };
 use openoj_domain::EvaluationId;
 use sqlx::PgPool;
@@ -72,6 +73,41 @@ impl EvaluationStore for PostgresEvaluationStore {
 }
 
 impl PostgresEvaluationStore {
+    /// Atomically claims one ready task whose requirements are a subset of a judge node's
+    /// declared capabilities.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable [`StoreError`] for unavailable, corrupt, or unavailable task state.
+    pub async fn judge_claim_task(&self, command: JudgeClaim) -> Result<TaskLease, StoreError> {
+        lease::judge_claim_task(&self.pool, command).await
+    }
+
+    /// Extends or cancels a current P0-C lease using only control-plane time and policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable [`StoreError`] for stale ownership, terminal state, or persistence failure.
+    pub async fn judge_renew_lease(
+        &self,
+        command: JudgeRenew,
+    ) -> Result<JudgeRenewDirective, StoreError> {
+        lease::judge_renew_lease(&self.pool, command).await
+    }
+
+    /// Commits a P0-C result after verifying judge-node provenance and operation replay identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable [`StoreError`] for stale ownership, provenance mismatch, or persistence
+    /// failure.
+    pub async fn judge_submit_result(
+        &self,
+        command: JudgeSubmitResult,
+    ) -> Result<EvaluationSnapshot, StoreError> {
+        terminal::judge_submit_result(&self.pool, command).await
+    }
+
     /// Connects to `PostgreSQL` with an already validated bounded pool size.
     ///
     /// # Errors

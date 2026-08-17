@@ -14,6 +14,9 @@ references:
 ## Development
 
 - 控制平面、数据库和 mock executor 可以单机运行。
+- P0-C 使用 `openoj-control-plane` 和 `openoj-judge-node` 两个独立进程；前者只监听绝对路径、`0700` 父目录下的 `0600` Unix Domain Socket，后者只连接该 UDS，不读取 `OPENOJ_DATABASE_URL`。
+- control-plane 启动需要 `OPENOJ_DATABASE_URL`、`OPENOJ_JUDGE_CONTROL_SOCKET` 和默认拒绝的 `OPENOJ_JUDGE_NODES` allowlist（`node_id:capability[,capability]`，多节点以分号分隔）；judge-node 需要 `OPENOJ_JUDGE_CONTROL_SOCKET`、`OPENOJ_JUDGE_NODE_ID` 和显式 `OPENOJ_JUDGE_EXECUTOR=development_mock`。
+- socket 已存在、相对路径、非私有父目录、未知 node/capability、协商版本不兼容或随机源不可用时必须拒绝启动/领取；不得以 TCP、宿主执行或隐式 mock 回退。
 - 无 KVM 时只能验证领域、协议、存储和 UI，不得给出真实隔离或 microVM 性能结论。
 - 开发凭证和数据不得复用生产环境。
 - UI/API 必须显式标识 mock executor 结果。

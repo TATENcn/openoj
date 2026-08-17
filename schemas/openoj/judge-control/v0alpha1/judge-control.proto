@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package openoj.judge.control.v0alpha1;
+
+service JudgeControl {
+  rpc Negotiate(NegotiateRequest) returns (NegotiateResponse);
+  rpc Claim(ClaimRequest) returns (ClaimResponse);
+  rpc RenewLease(RenewLeaseRequest) returns (RenewLeaseResponse);
+  rpc SubmitResult(SubmitResultRequest) returns (SubmitResultResponse);
+}
+
+message NegotiateRequest {
+  string version = 1;
+  string node_id = 2;
+  repeated string capabilities = 3;
+  ClientLimits client_limits = 4;
+}
+
+message ClientLimits {
+  uint32 max_request_bytes = 1;
+  uint32 max_response_bytes = 2;
+}
+
+message NegotiateResponse {
+  string accepted_version = 1;
+  repeated string allowed_capabilities = 2;
+  uint32 lease_duration_ms = 3;
+  uint32 renew_after_ms = 4;
+  uint32 no_task_backoff_ms = 5;
+  MethodLimits method_limits = 6;
+}
+
+message MethodLimits {
+  uint32 small_request_bytes = 1;
+  uint32 claim_response_bytes = 2;
+  uint32 submit_request_bytes = 3;
+}
+
+message ClaimRequest {
+  string version = 1;
+  string node_id = 2;
+  string claim_operation_id = 3;
+  repeated string capabilities = 4;
+}
+
+message ClaimResponse {
+  oneof outcome {
+    LeasedTask leased = 1;
+    NoTask no_task = 2;
+  }
+}
+
+message LeasedTask {
+  string evaluation_id = 1;
+  string attempt_id = 2;
+  uint32 attempt_number = 3;
+  string lease_token = 4;
+  uint64 lease_expires_at_unix_ms = 5;
+  bytes canonical_request = 6;
+}
+
+message NoTask {
+  uint32 retry_after_ms = 1;
+}
+
+message RenewLeaseRequest {
+  string version = 1;
+  string node_id = 2;
+  string evaluation_id = 3;
+  string attempt_id = 4;
+  string lease_token = 5;
+}
+
+message RenewLeaseResponse {
+  oneof directive {
+    ContinueLease continue_lease = 1;
+    CancelLease cancel_lease = 2;
+  }
+}
+
+message ContinueLease {
+  uint64 lease_expires_at_unix_ms = 1;
+  uint32 renew_after_ms = 2;
+}
+
+message CancelLease {}
+
+message SubmitResultRequest {
+  string version = 1;
+  string node_id = 2;
+  string evaluation_id = 3;
+  string attempt_id = 4;
+  string lease_token = 5;
+  string result_operation_id = 6;
+  bytes canonical_result = 7;
+}
+
+message SubmitResultResponse {
+  EvaluationSnapshot evaluation = 1;
+}
+
+message EvaluationSnapshot {
+  string evaluation_id = 1;
+  string state = 2;
+  uint32 current_attempt_number = 3;
+}

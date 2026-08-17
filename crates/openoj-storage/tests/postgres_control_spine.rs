@@ -1,12 +1,14 @@
 use std::error::Error;
 
 use openoj_application::{
-    CancelEvaluation, ClaimTask, ControlPlane, CreateEvaluation, Decision, RetryExpired,
-    StageContext, StageExecution, StageExecutor, StoreError, SubmitResult,
+    CancelEvaluation, ClaimTask, ControlPlane, CreateEvaluation, Decision, JudgeClaim, JudgeRenew,
+    JudgeRenewDirective, JudgeSubmitResult, LeasePolicy, RetryExpired, StageContext,
+    StageExecution, StageExecutor, StoreError, SubmitResult,
 };
 use openoj_domain::{
-    AttemptState, Capability, EvaluationState, ExecutorKind, IdempotencyKey, LeaseDuration,
-    LeaseToken, NodeId, ResourceUsage, Score, StageKind, UnixMillis, Verdict,
+    AttemptState, Capability, ClaimOperationId, EvaluationState, ExecutorKind, IdempotencyKey,
+    LeaseDuration, LeaseToken, NodeId, ResourceUsage, ResultOperationId, Score, StageKind,
+    UnixMillis, Verdict,
 };
 use openoj_protocol::{decode_evaluation_request, encode_evaluation_request};
 use openoj_storage::PostgresEvaluationStore;
@@ -26,6 +28,38 @@ fn distinct_request_value(label: &str) -> Result<serde_json::Value, serde_json::
 
 struct DecisionExecutor {
     decision: Decision,
+}
+
+struct NodeDecisionExecutor {
+    node_id: NodeId,
+    decision: Decision,
+}
+
+impl StageExecutor for NodeDecisionExecutor {
+    fn kind(&self) -> ExecutorKind {
+        ExecutorKind::DevelopmentMock
+    }
+
+    fn production_eligible(&self) -> bool {
+        false
+    }
+
+    fn node_id(&self) -> Option<NodeId> {
+        Some(self.node_id.clone())
+    }
+
+    fn supports(&self, capability: &Capability) -> bool {
+        capability.as_str() == "algorithm.batch"
+    }
+
+    fn execute(&mut self, context: StageContext<'_>) -> StageExecution {
+        StageExecution::Succeeded {
+            usage: ResourceUsage::default(),
+            diagnostics: Vec::new(),
+            evidence: Vec::new(),
+            decision: (context.stage() == StageKind::Check).then_some(self.decision),
+        }
+    }
 }
 
 struct CancellationExecutor;
@@ -96,7 +130,7 @@ async fn migration_is_repeatable_and_rejects_a_newer_schema(
         sqlx::query_scalar("SELECT schema_version FROM openoj_schema_metadata WHERE singleton")
             .fetch_one(&pool)
             .await?;
-    assert_eq!(schema_version, 1);
+    assert_eq!(schema_version, 2);
     store.check_compatibility().await?;
 
     let maximum_media_type = format!("{}/{}", "a".repeat(64), "b".repeat(64));
@@ -113,7 +147,7 @@ async fn migration_is_repeatable_and_rejects_a_newer_schema(
     .execute(&pool)
     .await?;
 
-    sqlx::query("UPDATE openoj_schema_metadata SET schema_version = 2 WHERE singleton")
+    sqlx::query("UPDATE openoj_schema_metadata SET schema_version = 3 WHERE singleton")
         .execute(&pool)
         .await?;
     assert_eq!(
@@ -157,6 +191,13 @@ async fn create_is_atomic_and_same_payload_replay_is_idempotent(
         .fetch_one(&pool)
         .await?;
     assert_eq!((evaluations, attempts, tasks), (1, 1, 1));
+    let required_capabilities: Vec<String> = sqlx::query_scalar(
+        "SELECT required_capabilities FROM evaluation_tasks WHERE attempt_id = $1",
+    )
+    .bind(request.attempt_id().as_str())
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(required_capabilities, vec!["algorithm.batch"]);
     Ok(())
 }
 
@@ -423,6 +464,190 @@ async fn concurrent_claim_has_one_winner_and_expiry_creates_attempt_two(
             ("attempt_01".to_owned(), 1, "expired".to_owned()),
             ("attempt_retry_02".to_owned(), 2, "queued".to_owned()),
         ]
+    );
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn judge_claim_dispatches_only_capability_compatible_tasks(
+    pool: PgPool,
+) -> Result<(), Box<dyn Error>> {
+    let store = PostgresEvaluationStore::from_pool(pool);
+    store.migrate().await?;
+    let algorithm_request = decode_evaluation_request(VALID_REQUEST)?;
+    let mut network_value = distinct_request_value("network_only")?;
+    network_value["required_capabilities"] = serde_json::json!(["network"]);
+    let network_request = decode_evaluation_request(&serde_json::to_vec(&network_value)?)?;
+    let control = ControlPlane::new(store.clone());
+    control
+        .create_evaluation(CreateEvaluation {
+            request: algorithm_request.clone(),
+            created_at: UnixMillis::new(10_000)?,
+        })
+        .await?;
+    control
+        .create_evaluation(CreateEvaluation {
+            request: network_request,
+            created_at: UnixMillis::new(10_001)?,
+        })
+        .await?;
+
+    let command = JudgeClaim {
+        node_id: NodeId::parse("judge_node_01")?,
+        declared_capabilities: vec![Capability::parse("algorithm.batch")?],
+        operation_id: ClaimOperationId::parse("claim_01")?,
+        lease_token: LeaseToken::parse("lease_01")?,
+        now: UnixMillis::new(11_000)?,
+        lease_policy: LeasePolicy::new(LeaseDuration::new(30_000)?, LeaseDuration::new(10_000)?)?,
+    };
+    let lease = store.judge_claim_task(command.clone()).await?;
+
+    assert_eq!(
+        lease.request.evaluation_id(),
+        algorithm_request.evaluation_id()
+    );
+    assert_eq!(lease.node_id.as_str(), "judge_node_01");
+    assert_eq!(store.judge_claim_task(command).await?, lease);
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn judge_renew_uses_server_time_and_lease_policy(pool: PgPool) -> Result<(), Box<dyn Error>> {
+    let store = PostgresEvaluationStore::from_pool(pool);
+    store.migrate().await?;
+    let request = decode_evaluation_request(VALID_REQUEST)?;
+    ControlPlane::new(store.clone())
+        .create_evaluation(CreateEvaluation {
+            request: request.clone(),
+            created_at: UnixMillis::new(20_000)?,
+        })
+        .await?;
+    let policy = LeasePolicy::new(LeaseDuration::new(30_000)?, LeaseDuration::new(10_000)?)?;
+    let lease = store
+        .judge_claim_task(JudgeClaim {
+            node_id: NodeId::parse("judge_node_01")?,
+            declared_capabilities: vec![Capability::parse("algorithm.batch")?],
+            operation_id: ClaimOperationId::parse("claim_renew_01")?,
+            lease_token: LeaseToken::parse("lease_renew_01")?,
+            now: UnixMillis::new(21_000)?,
+            lease_policy: policy,
+        })
+        .await?;
+
+    assert_eq!(
+        store
+            .judge_renew_lease(JudgeRenew {
+                node_id: lease.node_id.clone(),
+                evaluation_id: request.evaluation_id().clone(),
+                attempt_id: request.attempt_id().clone(),
+                lease_token: lease.lease_token,
+                now: UnixMillis::new(22_000)?,
+                lease_policy: policy,
+            })
+            .await?,
+        JudgeRenewDirective::Continue {
+            expires_at: UnixMillis::new(52_000)?,
+        }
+    );
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn judge_result_replays_a_matching_node_provenance_submission(
+    pool: PgPool,
+) -> Result<(), Box<dyn Error>> {
+    let store = PostgresEvaluationStore::from_pool(pool);
+    store.migrate().await?;
+    let request = decode_evaluation_request(VALID_REQUEST)?;
+    let node_id = NodeId::parse("judge_node_01")?;
+    ControlPlane::new(store.clone())
+        .create_evaluation(CreateEvaluation {
+            request: request.clone(),
+            created_at: UnixMillis::new(30_000)?,
+        })
+        .await?;
+    let lease = store
+        .judge_claim_task(JudgeClaim {
+            node_id: node_id.clone(),
+            declared_capabilities: vec![Capability::parse("algorithm.batch")?],
+            operation_id: ClaimOperationId::parse("claim_result_01")?,
+            lease_token: LeaseToken::parse("lease_result_01")?,
+            now: UnixMillis::new(31_000)?,
+            lease_policy: LeasePolicy::new(
+                LeaseDuration::new(30_000)?,
+                LeaseDuration::new(10_000)?,
+            )?,
+        })
+        .await?;
+    let result = openoj_application::evaluate(
+        &request,
+        &mut NodeDecisionExecutor {
+            node_id: node_id.clone(),
+            decision: Decision::new(Verdict::Accepted, Score::new(1, 1)?)?,
+        },
+    )?;
+    let command = JudgeSubmitResult {
+        node_id,
+        operation_id: ResultOperationId::parse("result_01")?,
+        lease_token: lease.lease_token,
+        result,
+        now: UnixMillis::new(32_000)?,
+    };
+
+    let first = store.judge_submit_result(command.clone()).await?;
+    let replayed = store.judge_submit_result(command).await?;
+
+    assert_eq!(first, replayed);
+    assert!(first.terminal_result);
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn judge_result_rejects_mismatched_node_provenance(
+    pool: PgPool,
+) -> Result<(), Box<dyn Error>> {
+    let store = PostgresEvaluationStore::from_pool(pool);
+    store.migrate().await?;
+    let request = decode_evaluation_request(VALID_REQUEST)?;
+    let owner = NodeId::parse("judge_node_01")?;
+    ControlPlane::new(store.clone())
+        .create_evaluation(CreateEvaluation {
+            request: request.clone(),
+            created_at: UnixMillis::new(40_000)?,
+        })
+        .await?;
+    let lease = store
+        .judge_claim_task(JudgeClaim {
+            node_id: owner.clone(),
+            declared_capabilities: vec![Capability::parse("algorithm.batch")?],
+            operation_id: ClaimOperationId::parse("claim_result_02")?,
+            lease_token: LeaseToken::parse("lease_result_02")?,
+            now: UnixMillis::new(41_000)?,
+            lease_policy: LeasePolicy::new(
+                LeaseDuration::new(30_000)?,
+                LeaseDuration::new(10_000)?,
+            )?,
+        })
+        .await?;
+    let result = openoj_application::evaluate(
+        &request,
+        &mut NodeDecisionExecutor {
+            node_id: owner,
+            decision: Decision::new(Verdict::Accepted, Score::new(1, 1)?)?,
+        },
+    )?;
+
+    assert_eq!(
+        store
+            .judge_submit_result(JudgeSubmitResult {
+                node_id: NodeId::parse("judge_node_02")?,
+                operation_id: ResultOperationId::parse("result_02")?,
+                lease_token: lease.lease_token,
+                result,
+                now: UnixMillis::new(42_000)?,
+            })
+            .await,
+        Err(StoreError::IdentityConflict)
     );
     Ok(())
 }

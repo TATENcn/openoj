@@ -17,9 +17,13 @@ P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0
 ```text
 apps/
   openoj-cli/               # 已实现
+  openoj-control-plane/     # P0-C 进行中：UDS Judge Control server 组装
+  openoj-judge-node/        # P0-C 进行中：UDS client 与显式 development-mock worker 组装
 crates/
   openoj-domain/            # 已实现
   openoj-protocol/          # 已实现
+  openoj-judge-core/        # P0-C 进行中：transport-neutral 单节点 worker 与 development mock
+  openoj-judge-protocol/    # P0-C 进行中：内部 Judge Control Protobuf/gRPC 契约
   openoj-application/       # 已实现
   openoj-storage/           # 已实现
   openoj-scheduler/         # 规划中
@@ -33,7 +37,6 @@ guest/
 # 规划中的进程（尚未创建空 crate）
 apps/
   openoj-api/
-  openoj-judge-node/
 web/
 schemas/
 infra/
@@ -47,6 +50,8 @@ domain <- application <- apps
    |           +-- scheduler / evaluator interfaces
    +-- protocol conversion boundaries
 
+domain <- judge-protocol -> protocol
+
 firecracker <- judge-node
 storage     <- application adapters
 plugin-host <- application capability adapters
@@ -56,6 +61,8 @@ plugin-host <- application capability adapters
 
 - `openoj-domain` 只包含领域类型、规则和纯逻辑；不得依赖 async runtime、数据库、HTTP、Firecracker 或 UI。
 - `openoj-protocol` 包含 canonical schema 对应类型和兼容转换；不得承载权限或业务决策。
+- `openoj-judge-protocol` 包含内部 Judge Control `.proto`、生成绑定与有界 transport 转换；不得复制 canonical Evaluation 语义、承载授权或依赖数据库。
+- `openoj-judge-core` 包含单节点 worker 和显式 development mock executor；不得依赖 Tonic、SQLx、Firecracker 或宿主进程执行 API。
 - `openoj-application` 编排用例并依赖 trait，不依赖具体数据库和 VMM 实现。
 - `openoj-storage` 实现持久化、transaction、outbox 和 migration，不把数据库类型泄漏到 domain。
 - `openoj-firecracker` 封装 jailer/VMM、vsock、磁盘、网络和回收；不得包含用户、竞赛或计分逻辑。

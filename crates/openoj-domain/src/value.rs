@@ -80,6 +80,8 @@ opaque_id!(ArtifactId, "artifact_id");
 opaque_id!(EvidenceId, "evidence_id");
 opaque_id!(NodeId, "node_id");
 opaque_id!(LeaseToken, "lease_token");
+opaque_id!(ClaimOperationId, "claim_operation_id");
+opaque_id!(ResultOperationId, "result_operation_id");
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct IdempotencyKey(String);
@@ -282,7 +284,7 @@ impl DiagnosticCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{Capability, ContentDigest, DiagnosticCode, ProblemId};
+    use super::{Capability, ClaimOperationId, ContentDigest, DiagnosticCode, ProblemId};
 
     #[test]
     fn identifiers_are_distinct_and_bounded() {
@@ -304,5 +306,11 @@ mod tests {
         assert!(Capability::parse("algorithm..batch").is_err());
         assert!(DiagnosticCode::parse("STAGE_FAILED").is_ok());
         assert!(DiagnosticCode::parse("stage_failed").is_err());
+    }
+
+    #[test]
+    fn claim_operation_id_uses_the_opaque_identifier_bound() {
+        assert!(ClaimOperationId::parse("claim_01").is_ok());
+        assert!(ClaimOperationId::parse("a".repeat(65)).is_err());
     }
 }

@@ -1,0 +1,20 @@
+[package]
+name = "openoj-judge-node"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+getrandom.workspace = true
+hex.workspace = true
+openoj-application.workspace = true
+openoj-domain.workspace = true
+openoj-judge-core.workspace = true
+openoj-judge-protocol.workspace = true
+openoj-protocol.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+tonic = { workspace = true, features = ["codegen", "transport"] }
+
+[lints]
+workspace = true
