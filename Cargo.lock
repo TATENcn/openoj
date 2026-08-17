@@ -1069,6 +1069,9 @@ dependencies = [
 [[package]]
 name = "openoj-control-plane"
 version = "0.0.0"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "openoj-domain"
