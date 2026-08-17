@@ -1067,6 +1067,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "openoj-control-plane"
+version = "0.0.0"
+
+[[package]]
 name = "openoj-domain"
 version = "0.0.0"
 

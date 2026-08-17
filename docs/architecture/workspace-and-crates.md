@@ -17,6 +17,7 @@ P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0
 ```text
 apps/
   openoj-cli/               # 已实现
+  openoj-control-plane/     # P0-C 进行中：UDS Judge Control server 组装
 crates/
   openoj-domain/            # 已实现
   openoj-protocol/          # 已实现

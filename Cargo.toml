@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "apps/openoj-cli",
+    "apps/openoj-control-plane",
     "crates/openoj-application",
     "crates/openoj-domain",
     "crates/openoj-judge-core",
