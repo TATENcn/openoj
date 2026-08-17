@@ -79,6 +79,7 @@ opaque_id!(RuntimeId, "runtime_id");
 opaque_id!(ArtifactId, "artifact_id");
 opaque_id!(EvidenceId, "evidence_id");
 opaque_id!(NodeId, "node_id");
+opaque_id!(LeaseToken, "lease_token");
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct IdempotencyKey(String);

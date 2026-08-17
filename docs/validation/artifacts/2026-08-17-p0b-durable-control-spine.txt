@@ -1,0 +1,29 @@
+OpenOJ P0-B durable control spine local verification summary
+Date: 2026-08-17 Asia/Shanghai
+Target before evidence-only documentation commit: 84869f844a9f3623712aff2448132e8758d30c6c
+OS: Linux 7.1.8-zen1-3-zen x86_64
+Rust: rustc 1.97.1; cargo 1.97.1
+Database: PostgreSQL 17.10, disposable local container, loopback port 55432, tmpfs data
+
+PASSED bash scripts/check-docs.sh
+PASSED cargo fmt --all -- --check
+PASSED cargo check --workspace --all-targets --locked
+PASSED cargo clippy --workspace --all-targets --locked -- -D warnings
+PASSED DATABASE_URL=<redacted-loopback-test-url> cargo test --workspace --all-targets --locked
+  36 passed; 0 failed; 0 ignored
+  Includes 11 PostgreSQL storage tests and 4 CLI tests.
+PASSED python3 scripts/check-workspace.py
+PASSED cargo deny --locked check advisories bans sources
+  advisories ok; bans ok; sources ok
+  Duplicate transitive-version warnings remain for the pinned SQLx dependency graph.
+
+Process-level CLI smoke test:
+PASSED openoj-cli migrate
+  migrated schema 1
+PASSED openoj-cli submit schemas/openoj/v0alpha1/fixtures/evaluation-request.valid.json
+  evaluation=eval_01 attempt=attempt_01 attempt_number=1 state=queued terminal_result=false
+PASSED openoj-cli status eval_01
+  evaluation=eval_01 attempt=attempt_01 attempt_number=1 state=queued terminal_result=false
+
+NOT RUN: Firecracker/KVM execution, judge-node process recovery, production PostgreSQL,
+PostgreSQL 18 CI, release performance, network partition, host reboot, or backup restore drill.

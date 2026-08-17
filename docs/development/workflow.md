@@ -50,6 +50,8 @@ cargo deny --locked check advisories bans sources
 python3 scripts/check-workspace.py
 ```
 
+包含 `#[sqlx::test]` 的 workspace 测试必须连接隔离 PostgreSQL；本机设置 `DATABASE_URL`，CI 同时设置 `DATABASE_URL` 与兼容运维工具使用的 `OPENOJ_TEST_DATABASE_URL`。测试数据库不得复用开发或生产数据，测试 harness 可以创建和删除以 `_test` 为来源的临时数据库。
+
 具体命令在工具链和 workspace 创建时由同一变更验证并更新。不得写入尚不存在或从未执行的“已通过”结果。
 
 原型阶段只机械阻断 advisory、禁用依赖和非允许来源。完整 `cargo deny --locked check` 的 license gate 已预留，但必须等平台许可证、允许依赖许可证和 DCO/CLA 策略成为 Accepted 后才能启用；在此之前仍禁止正式发布或分发产物。

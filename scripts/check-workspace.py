@@ -11,6 +11,12 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 ALLOWED_WORKSPACE_EDGES = {
+    "openoj-cli": {
+        ("openoj-application", "normal"),
+        ("openoj-domain", "normal"),
+        ("openoj-protocol", "normal"),
+        ("openoj-storage", "normal"),
+    },
     "openoj-domain": set(),
     "openoj-application": {
         ("openoj-domain", "normal"),
@@ -18,6 +24,11 @@ ALLOWED_WORKSPACE_EDGES = {
     },
     "openoj-protocol": {
         ("openoj-domain", "normal"),
+    },
+    "openoj-storage": {
+        ("openoj-application", "normal"),
+        ("openoj-domain", "normal"),
+        ("openoj-protocol", "normal"),
     },
 }
 

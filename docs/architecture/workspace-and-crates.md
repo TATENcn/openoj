@@ -12,25 +12,28 @@ references:
 
 以下是首个垂直切片的目标布局；创建 workspace 时可以通过 ADR 调整名称，但不得破坏依赖方向。
 
-P0-A 当前只实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。未实现组件不创建空 crate；每增加一个 crate，都必须同时交付其边界行为和测试。
+P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0-B 增加 `openoj-storage` 和 `openoj-cli`：前者负责 PostgreSQL migration、兼容检查、持久化 transaction 和可靠 task/outbox，后者只组装 migration、提交和状态查询命令。未实现组件不创建空 crate，每增加一个 crate 都必须同时交付其边界行为和测试。
 
 ```text
 apps/
+  openoj-cli/               # 已实现
+crates/
+  openoj-domain/            # 已实现
+  openoj-protocol/          # 已实现
+  openoj-application/       # 已实现
+  openoj-storage/           # 已实现
+  openoj-scheduler/         # 规划中
+  openoj-evaluator/         # 规划中
+  openoj-firecracker/       # 规划中
+  openoj-plugin-host/       # 规划中
+  openoj-observability/     # 规划中
+guest/
+  openoj-guest-agent/       # 规划中
+
+# 规划中的进程（尚未创建空 crate）
+apps/
   openoj-api/
   openoj-judge-node/
-  openoj-cli/
-crates/
-  openoj-domain/
-  openoj-protocol/
-  openoj-application/
-  openoj-storage/
-  openoj-scheduler/
-  openoj-evaluator/
-  openoj-firecracker/
-  openoj-plugin-host/
-  openoj-observability/
-guest/
-  openoj-guest-agent/
 web/
 schemas/
 infra/
