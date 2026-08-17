@@ -1,0 +1,20 @@
+[package]
+name = "openoj-judge-protocol"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+openoj-domain.workspace = true
+openoj-protocol.workspace = true
+prost.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+
+[build-dependencies]
+protoc-bin-vendored.workspace = true
+tonic-prost-build.workspace = true
+
+[lints]
+workspace = true

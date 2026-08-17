@@ -18,7 +18,7 @@ references:
 | 核心语言 | Rust 2024，固定稳定工具链 | 禁止依赖未固定 nightly；版本由 `rust-toolchain.toml` 固定 |
 | 异步运行时 | Tokio | 所有队列、并发、超时和取消必须有界 |
 | HTTP API | Axum | 只在 API 边界使用框架类型 |
-| 内部 RPC | Tonic/Protobuf 候选 | 与公开评测语义通过显式转换隔离 |
+| 内部 RPC | P0-C 使用 Tonic/Protobuf over UDS | 仅本机 Unix Domain Socket；与公开评测语义通过显式转换隔离，不开放 TCP/TLS |
 | 序列化 | Serde | 不可信输入设置深度、大小和集合上限 |
 | 数据库 | PostgreSQL + SQLx | 编译期查询不是绕过 migration/兼容测试的理由 |
 | 大型产物 | S3 兼容对象存储 | 内容寻址、完整性、敏感级别和保留策略 |
