@@ -6,6 +6,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+getrandom.workspace = true
+hex.workspace = true
 openoj-application.workspace = true
 openoj-domain.workspace = true
 openoj-protocol.workspace = true

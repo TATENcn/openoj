@@ -431,6 +431,47 @@ impl EvaluationRequest {
     pub fn required_capabilities(&self) -> &[Capability] {
         &self.required_capabilities
     }
+
+    /// Returns a semantic copy of this request bound to the next physical attempt.
+    ///
+    /// The evaluation identity, problem version, submission, runtime, plan and policy are
+    /// preserved; only the `attempt_id`, the incremented `attempt_number` and the idempotency
+    /// key change. A distinct idempotency key is required because each attempt owns a unique
+    /// idempotency key in the durable store, so a retry is a distinct idempotent operation.
+    /// This is the recovery path's single source for a retried attempt.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::OutOfRange`] when the attempt number cannot advance without
+    /// overflowing the supported range.
+    pub fn with_next_attempt(
+        &self,
+        next_attempt_id: AttemptId,
+        next_idempotency_key: IdempotencyKey,
+    ) -> Result<Self, DomainError> {
+        let attempt_number = self
+            .attempt_number
+            .checked_add(1)
+            .ok_or(DomainError::OutOfRange {
+                field: "attempt_number",
+                minimum: 1,
+                maximum: u64::from(u32::MAX),
+                actual: u64::from(self.attempt_number),
+            })?;
+        Self::new(EvaluationRequestParts {
+            request_id: self.request_id.clone(),
+            idempotency_key: next_idempotency_key,
+            evaluation_id: self.evaluation_id.clone(),
+            attempt_id: next_attempt_id,
+            attempt_number,
+            problem_version: self.problem_version.clone(),
+            submission: self.submission.clone(),
+            runtime: self.runtime.clone(),
+            plan: self.plan.clone(),
+            policy: self.policy.clone(),
+            required_capabilities: self.required_capabilities.clone(),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1234,5 +1275,72 @@ mod tests {
         assert!(Score::new(1, 1).is_ok());
         assert!(Score::new(2, 1).is_err());
         assert!(Score::new(0, 0).is_err());
+    }
+
+    fn sample_request(
+        attempt_id: &str,
+        attempt_number: u32,
+    ) -> Result<crate::EvaluationRequest, crate::DomainError> {
+        use crate::{
+            ArtifactRef, ArtifactSensitivity, AttemptId, Capability, ContentDigest, EvaluationId,
+            EvaluationRequest, EvaluationRequestParts, IdempotencyKey, MediaType, NetworkPolicy,
+            ProblemId, ProblemVersionId, RequestId, ResourcePolicy, RuntimeId, SubmissionId,
+            SubmissionRef,
+        };
+        let digest = ContentDigest::parse(format!("sha256:{}", "1".repeat(64)))?;
+        let source = ArtifactRef::new(
+            crate::ArtifactId::parse("artifact_source_01")?,
+            digest.clone(),
+            MediaType::parse("application/json")?,
+            1,
+            ArtifactSensitivity::Private,
+        )?;
+        EvaluationRequest::new(EvaluationRequestParts {
+            request_id: RequestId::parse("req_01")?,
+            idempotency_key: IdempotencyKey::parse("idem_01")?,
+            evaluation_id: EvaluationId::parse("eval_01")?,
+            attempt_id: AttemptId::parse(attempt_id)?,
+            attempt_number,
+            problem_version: crate::ProblemVersionRef::new(
+                ProblemId::parse("problem_01")?,
+                ProblemVersionId::parse("problem_version_01")?,
+                digest.clone(),
+            ),
+            submission: SubmissionRef::new(SubmissionId::parse("submission_01")?, source),
+            runtime: crate::RuntimeRef::new(RuntimeId::parse("runtime_01")?, digest.clone()),
+            plan: EvaluationPlan::algorithm_batch(),
+            policy: ResourcePolicy::new(1, 1, 1, 1, 1, NetworkPolicy::Denied)?,
+            required_capabilities: vec![Capability::parse("algorithm.batch")?],
+        })
+    }
+
+    #[test]
+    fn with_next_attempt_advances_identity_and_preserves_semantics()
+    -> Result<(), crate::DomainError> {
+        let original = sample_request("attempt_01", 1)?;
+        let next = original.with_next_attempt(
+            crate::AttemptId::parse("attempt_02")?,
+            crate::IdempotencyKey::parse("idem_retry_02")?,
+        )?;
+
+        assert_eq!(next.attempt_id().as_str(), "attempt_02");
+        assert_eq!(next.attempt_number(), 2);
+        // The retry owns a fresh idempotency key; the remaining semantics are preserved.
+        assert_eq!(next.idempotency_key().as_str(), "idem_retry_02");
+        assert_ne!(next.idempotency_key(), original.idempotency_key());
+        assert_eq!(next.evaluation_id(), original.evaluation_id());
+        assert_eq!(next.request_id(), original.request_id());
+        assert_eq!(next.problem_version(), original.problem_version());
+        assert_eq!(next.submission(), original.submission());
+        assert_eq!(next.runtime(), original.runtime());
+        assert_eq!(next.plan(), original.plan());
+        assert_eq!(next.policy(), original.policy());
+        assert_eq!(
+            next.required_capabilities(),
+            original.required_capabilities()
+        );
+        // A retry must differ from the original only in attempt identity.
+        assert_ne!(original, next);
+        Ok(())
     }
 }

@@ -13,7 +13,7 @@ use openoj_application::{
     JudgeRenew, JudgeRenewDirective, JudgeSubmitResult, RetryExpired, StoreFuture, SubmitResult,
     TaskLease,
 };
-use openoj_domain::EvaluationId;
+use openoj_domain::{EvaluationId, UnixMillis};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -137,6 +137,17 @@ impl PostgresEvaluationStore {
     /// Returns [`StoreError::Unavailable`] when `PostgreSQL` cannot apply or verify a migration.
     pub async fn migrate(&self) -> Result<(), StoreError> {
         migration::run(&self.pool).await
+    }
+
+    /// Re-enqueues every evaluation whose current attempt lease has expired.
+    ///
+    /// Returns the number of recovered attempts; rows already re-enqueued or terminal are skipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable [`StoreError`] for persistence, decoding, or identity failures.
+    pub async fn recover_expired(&self, now: UnixMillis) -> Result<u32, StoreError> {
+        lease::recover_expired(&self.pool, now).await
     }
 
     /// Refuses a database whose `OpenOJ` schema is missing, corrupt, or newer than this binary.

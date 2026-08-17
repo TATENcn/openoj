@@ -28,4 +28,5 @@ references:
 - `2026-08-16-phase-0-governance.md`：Phase 0 文档与 Agent 治理基线。
 - `2026-08-16-p0-evaluation-kernel.md`：P0-A schema-first 内存评测内核。
 - `2026-08-17-p0b-durable-control-spine.md`：P0-B PostgreSQL 持久化控制脊柱。
-- `2026-08-17-p0c-judge-control.md`：P0-C UDS Judge Control 与真实进程闭环；含失败路径回归，真实进程强杀恢复等项仍为 Unverified。
+- `2026-08-17-p0c-judge-control.md`：P0-C UDS Judge Control 与真实进程闭环；含失败路径回归。
+- `2026-08-17-p0d-expired-lease-recovery.md`：P0-D 过期租约恢复，sweeper 接入 control-plane 进程路径并验证端到端强杀恢复。
