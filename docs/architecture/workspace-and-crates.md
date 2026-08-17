@@ -12,18 +12,18 @@ references:
 
 以下是首个垂直切片的目标布局；创建 workspace 时可以通过 ADR 调整名称，但不得破坏依赖方向。
 
-P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0-B 增加 `openoj-storage` 和 `openoj-cli`：前者负责 PostgreSQL migration、兼容检查、持久化 transaction 和可靠 task/outbox，后者只组装 migration、提交和状态查询命令。未实现组件不创建空 crate，每增加一个 crate 都必须同时交付其边界行为和测试。
+P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0-B 增加 `openoj-storage` 和 `openoj-cli`：前者负责 PostgreSQL migration、兼容检查、持久化 transaction 和可靠 task/outbox，后者只组装 migration、提交和状态查询命令。P0-C 增加 `openoj-judge-protocol`、`openoj-judge-core`、`openoj-control-plane` 和 `openoj-judge-node`，交付 UDS gRPC Judge Control 契约、单并发 worker 与显式 development mock，形成真实双进程闭环。未实现组件不创建空 crate，每增加一个 crate 都必须同时交付其边界行为和测试。
 
 ```text
 apps/
   openoj-cli/               # 已实现
-  openoj-control-plane/     # P0-C 进行中：UDS Judge Control server 组装
-  openoj-judge-node/        # P0-C 进行中：UDS client 与显式 development-mock worker 组装
+  openoj-control-plane/     # 已实现：UDS Judge Control server 组装
+  openoj-judge-node/        # 已实现：UDS client 与显式 development-mock worker 组装
 crates/
   openoj-domain/            # 已实现
   openoj-protocol/          # 已实现
-  openoj-judge-core/        # P0-C 进行中：transport-neutral 单节点 worker 与 development mock
-  openoj-judge-protocol/    # P0-C 进行中：内部 Judge Control Protobuf/gRPC 契约
+  openoj-judge-core/        # 已实现：transport-neutral 单节点 worker 与 development mock
+  openoj-judge-protocol/    # 已实现：内部 Judge Control Protobuf/gRPC 契约
   openoj-application/       # 已实现
   openoj-storage/           # 已实现
   openoj-scheduler/         # 规划中
