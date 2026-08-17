@@ -1,8 +1,8 @@
 //! Transport-neutral Judge Node worker components.
 
 use openoj_application::{
-    ApplicationError, Decision, StageContext, StageExecution, StageExecutor, StoreError, TaskLease,
-    evaluate,
+    ApplicationError, Decision, JudgeRenewDirective, StageContext, StageExecution, StageExecutor,
+    StoreError, TaskLease, evaluate,
 };
 use openoj_domain::{
     Capability, ClaimOperationId, EvaluationRequest, EvaluationResult, ExecutorKind, NodeId,
@@ -56,6 +56,16 @@ pub trait AsyncJudgeControlClient: Send {
         operation_id: ClaimOperationId,
     ) -> impl Future<Output = Result<WorkerClaim, StoreError>> + Send;
 
+    /// Checks whether a claimed lease remains valid before execution starts.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable control-plane error when the lease cannot be renewed or inspected.
+    fn renew(
+        &mut self,
+        lease: &TaskLease,
+    ) -> impl Future<Output = Result<JudgeRenewDirective, StoreError>> + Send;
+
     /// Submits the result associated with a previously claimed lease.
     ///
     /// # Errors
@@ -79,6 +89,7 @@ pub enum WorkerClaim {
 pub enum WorkerOutcome {
     Submitted,
     NoTask,
+    Cancelled,
 }
 
 /// Single-concurrency Judge Node worker.
@@ -131,6 +142,9 @@ impl<E: JudgeExecutor + Send> Worker<E> {
         match client.claim(claim_operation_id).await? {
             WorkerClaim::NoTask => Ok(WorkerOutcome::NoTask),
             WorkerClaim::Lease(lease) => {
+                if client.renew(&lease).await? == JudgeRenewDirective::Cancel {
+                    return Ok(WorkerOutcome::Cancelled);
+                }
                 let result = self.executor.execute(&lease.request)?;
                 client.submit(&lease, result_operation_id, result).await?;
                 Ok(WorkerOutcome::Submitted)

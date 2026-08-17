@@ -3,7 +3,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::path::Path;
 
-use openoj_application::{StoreError, TaskLease};
+use openoj_application::{JudgeRenewDirective, StoreError, TaskLease};
 use openoj_domain::{
     Capability, ClaimOperationId, EvaluationResult, LeaseDuration, LeaseToken, NodeId,
     ResultOperationId, UnixMillis,
@@ -11,7 +11,8 @@ use openoj_domain::{
 use openoj_judge_core::{AsyncJudgeControlClient, WorkerClaim};
 use openoj_judge_protocol::CLIENT_PROTOCOL_VERSION;
 use openoj_judge_protocol::wire::{
-    ClaimRequest, SubmitResultRequest, claim_response, judge_control_client::JudgeControlClient,
+    ClaimRequest, RenewLeaseRequest, SubmitResultRequest, claim_response,
+    judge_control_client::JudgeControlClient, renew_lease_response,
 };
 use openoj_protocol::{decode_evaluation_request, encode_evaluation_result};
 
@@ -142,6 +143,33 @@ impl AsyncJudgeControlClient for UdsJudgeControlClient {
                     expires_at: UnixMillis::new(leased.lease_expires_at_unix_ms)
                         .map_err(|_| StoreError::CorruptData)?,
                 })))
+            }
+            None => Err(StoreError::CorruptData),
+        }
+    }
+
+    async fn renew(&mut self, lease: &TaskLease) -> Result<JudgeRenewDirective, StoreError> {
+        let response = self
+            .client
+            .renew_lease(RenewLeaseRequest {
+                version: CLIENT_PROTOCOL_VERSION.to_owned(),
+                node_id: self.node_id.as_str().to_owned(),
+                evaluation_id: lease.request.evaluation_id().as_str().to_owned(),
+                attempt_id: lease.request.attempt_id().as_str().to_owned(),
+                lease_token: lease.lease_token.as_str().to_owned(),
+            })
+            .await
+            .map_err(|status| map_status(&status))?
+            .into_inner();
+        match response.directive {
+            Some(renew_lease_response::Directive::ContinueLease(continue_lease)) => {
+                Ok(JudgeRenewDirective::Continue {
+                    expires_at: UnixMillis::new(continue_lease.lease_expires_at_unix_ms)
+                        .map_err(|_| StoreError::CorruptData)?,
+                })
+            }
+            Some(renew_lease_response::Directive::CancelLease(_)) => {
+                Ok(JudgeRenewDirective::Cancel)
             }
             None => Err(StoreError::CorruptData),
         }

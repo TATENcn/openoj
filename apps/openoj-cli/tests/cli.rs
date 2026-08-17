@@ -72,7 +72,7 @@ async fn migrate_submit_replay_and_status_use_the_durable_store(
     let store = PostgresEvaluationStore::from_pool(pool.clone());
     assert_eq!(
         execute_with_store(CliCommand::Migrate, store.clone(), UnixMillis::new(12_000)?).await?,
-        "migrated schema 1"
+        "migrated schema 2"
     );
 
     let path = std::env::temp_dir().join(format!(

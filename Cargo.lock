@@ -1247,6 +1247,7 @@ dependencies = [
  "openoj-application",
  "openoj-domain",
  "openoj-protocol",
+ "tokio",
 ]
 
 [[package]]

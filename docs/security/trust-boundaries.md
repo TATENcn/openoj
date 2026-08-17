@@ -53,6 +53,8 @@ flowchart TB
 
 只传输版本化任务、Artifact 引用、不可变环境摘要、资源 Policy 和短期能力。judge node 不接受任意 shell 命令、宿主路径或控制平面数据库连接串。
 
+P0-C 仅允许本机私有 UDS 上的 `JudgeControl` RPC：control-plane 拥有时钟、lease policy 与随机 lease token，node 的 `node_id` 只用于部署 allowlist 关联而不是密码。UDS 文件权限与 allowlist 共同降低同机误接入风险，但不构成跨主机身份认证；TCP/mTLS 必须由后续 ADR 和安全评审引入。
+
 ### judge host 到 VMM/guest
 
 宿主验证 kernel、rootfs、磁盘和配置来源，使用独立 uid/gid、cgroup 和 jail。vsock 消息必须有版本、长度、状态、超时和取消约束。guest 的任何输出都重新按不可信输入处理。

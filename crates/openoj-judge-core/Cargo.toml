@@ -11,6 +11,7 @@ openoj-domain.workspace = true
 
 [dev-dependencies]
 openoj-protocol.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true
