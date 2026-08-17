@@ -156,7 +156,7 @@ CI 使用隔离 PostgreSQL service，不依赖公网、真实墙钟或测试顺�
 
 ## 依赖、迁移与回退
 
-新增 `sqlx = 0.9.0`，关闭 default features，仅启用 `postgres`、`runtime-tokio`、`migrate` 和 `tls-rustls-ring-native-roots`；它要求 Rust 1.94，低于 workspace 1.97，许可证为 MIT OR Apache-2.0。新增 `tokio = 1.53.1`，关闭 default features，library/test/CLI 按需启用 `rt-multi-thread`、`macros`、`fs`，许可证为 MIT。两者来自 crates.io 官方仓库并由 `Cargo.lock` 固定。
+新增 `sqlx = 0.9.0`，关闭 default features，仅启用 `postgres`、`runtime-tokio`、`migrate`、`macros` 和 `tls-rustls-ring-native-roots`；`macros` 只用于把已发布 migration 及其 checksum 嵌入二进制，不使用在线 query macro。它要求 Rust 1.94，低于 workspace 1.97，许可证为 MIT OR Apache-2.0。新增 `tokio = 1.53.1`，关闭 default features，library/test/CLI 按需启用 `rt-multi-thread`、`macros`、`fs`，许可证为 MIT。两者来自 crates.io 官方仓库并由 `Cargo.lock` 固定。
 
 SQLx 可被另一个 PostgreSQL adapter 替换而不改变 application/domain API，但 migration/query 重写成本中等；Tokio 是已接受运行时，移除会影响全部异步进程组装。依赖策略文档必须记录 feature、维护/许可证、替代方案和移除成本；当前许可证决策仍阻塞正式分发，不因本切片改变。
 
