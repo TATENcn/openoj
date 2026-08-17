@@ -2,11 +2,132 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::future::Future;
 use std::pin::Pin;
+use std::{collections::BTreeMap, collections::BTreeSet};
 
 use openoj_domain::{
-    AttemptId, AttemptState, EvaluationId, EvaluationRequest, EvaluationResult, EvaluationState,
-    IdempotencyKey, LeaseDuration, LeaseToken, NodeId, UnixMillis,
+    AttemptId, AttemptState, Capability, EvaluationId, EvaluationRequest, EvaluationResult,
+    EvaluationState, IdempotencyKey, LeaseDuration, LeaseToken, NodeId, UnixMillis,
 };
+
+/// P0-C control-plane policy for a lease and its server-scheduled renewal interval.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LeasePolicy {
+    lease_duration: LeaseDuration,
+    renew_after: LeaseDuration,
+}
+
+impl LeasePolicy {
+    /// Creates a bounded server-owned lease policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NodePolicyError::InvalidRenewSchedule`] when renewals would occur after half of
+    /// the lease interval.
+    pub fn new(
+        lease_duration: LeaseDuration,
+        renew_after: LeaseDuration,
+    ) -> Result<Self, NodePolicyError> {
+        if renew_after.value() > lease_duration.value() / 2 {
+            return Err(NodePolicyError::InvalidRenewSchedule);
+        }
+        Ok(Self {
+            lease_duration,
+            renew_after,
+        })
+    }
+
+    #[must_use]
+    pub const fn lease_duration(self) -> LeaseDuration {
+        self.lease_duration
+    }
+
+    #[must_use]
+    pub const fn renew_after(self) -> LeaseDuration {
+        self.renew_after
+    }
+}
+
+/// Control-plane allowlist for locally deployed P0-C judge nodes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NodePolicy {
+    allowed: BTreeMap<NodeId, BTreeSet<Capability>>,
+}
+
+impl NodePolicy {
+    /// Creates a default-deny node allowlist.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NodePolicyError::DuplicateNode`] or [`NodePolicyError::InvalidCapabilities`] for
+    /// ambiguous deployment configuration.
+    pub fn new(
+        nodes: impl IntoIterator<Item = (NodeId, Vec<Capability>)>,
+    ) -> Result<Self, NodePolicyError> {
+        let mut allowed = BTreeMap::new();
+        for (node_id, capabilities) in nodes {
+            let capability_count = capabilities.len();
+            let unique = capabilities.into_iter().collect::<BTreeSet<_>>();
+            if unique.is_empty() || unique.len() > 64 || unique.len() != capability_count {
+                return Err(NodePolicyError::InvalidCapabilities);
+            }
+            if allowed.insert(node_id, unique).is_some() {
+                return Err(NodePolicyError::DuplicateNode);
+            }
+        }
+        Ok(Self { allowed })
+    }
+
+    /// Authorizes a node's declared capabilities against its deployment allowlist.
+    ///
+    /// # Errors
+    ///
+    /// Returns a default-deny [`NodePolicyError`] for unknown nodes or capability expansion.
+    pub fn authorize(
+        &self,
+        node_id: &NodeId,
+        declared: &[Capability],
+    ) -> Result<(), NodePolicyError> {
+        let allowed = self
+            .allowed
+            .get(node_id)
+            .ok_or(NodePolicyError::IdentityDenied)?;
+        if declared.is_empty() {
+            return Err(NodePolicyError::CapabilityDenied);
+        }
+        let unique_declared = declared.iter().collect::<BTreeSet<_>>();
+        if unique_declared.len() != declared.len()
+            || unique_declared
+                .iter()
+                .any(|capability| !allowed.contains(*capability))
+        {
+            return Err(NodePolicyError::CapabilityDenied);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NodePolicyError {
+    InvalidRenewSchedule,
+    DuplicateNode,
+    InvalidCapabilities,
+    IdentityDenied,
+    CapabilityDenied,
+}
+
+impl Display for NodePolicyError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidRenewSchedule => "renew schedule exceeds half of the lease duration",
+            Self::DuplicateNode => "node policy contains a duplicate node",
+            Self::InvalidCapabilities => "node policy contains an invalid capability set",
+            Self::IdentityDenied => "judge node is not allowed by deployment policy",
+            Self::CapabilityDenied => "judge node declared a capability outside its allowlist",
+        })
+    }
+}
+
+impl Error for NodePolicyError {}
 
 pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StoreError>> + Send + 'a>>;
 
