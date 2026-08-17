@@ -38,6 +38,11 @@ pub enum DomainError {
     InvalidProvenance {
         reason: &'static str,
     },
+    InvalidTransition {
+        entity: &'static str,
+        from: &'static str,
+        to: &'static str,
+    },
 }
 
 impl Display for DomainError {
@@ -82,6 +87,12 @@ impl Display for DomainError {
             }
             Self::InvalidProvenance { reason } => {
                 write!(formatter, "execution provenance is invalid: {reason}")
+            }
+            Self::InvalidTransition { entity, from, to } => {
+                write!(
+                    formatter,
+                    "invalid {entity} state transition from {from} to {to}"
+                )
             }
         }
     }

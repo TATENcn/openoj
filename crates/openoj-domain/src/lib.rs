@@ -1,10 +1,15 @@
 mod artifact;
+mod control;
 mod error;
 mod evaluation;
 mod value;
 
 pub use artifact::{
     ArtifactRef, ArtifactSensitivity, MAX_ARTIFACT_BYTES, MAX_MEDIA_TYPE_LENGTH, MediaType,
+};
+pub use control::{
+    AttemptState, EvaluationState, LeaseDuration, MAX_LEASE_DURATION_MS, MAX_UNIX_MILLIS,
+    UnixMillis,
 };
 pub use error::DomainError;
 pub use evaluation::{
@@ -18,7 +23,7 @@ pub use evaluation::{
 };
 pub use value::{
     ArtifactId, AttemptId, Capability, ContentDigest, DiagnosticCode, EvaluationId, EvidenceId,
-    EvidenceKind, IdempotencyKey, MAX_CAPABILITY_LENGTH, MAX_DIAGNOSTIC_CODE_LENGTH,
+    EvidenceKind, IdempotencyKey, LeaseToken, MAX_CAPABILITY_LENGTH, MAX_DIAGNOSTIC_CODE_LENGTH,
     MAX_EVIDENCE_KIND_LENGTH, MAX_IDEMPOTENCY_KEY_LENGTH, MAX_OPAQUE_ID_LENGTH, NodeId, ProblemId,
     ProblemVersionId, RequestId, RuntimeId, SubmissionId,
 };
