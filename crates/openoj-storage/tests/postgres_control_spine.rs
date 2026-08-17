@@ -1,12 +1,12 @@
 use std::error::Error;
 
 use openoj_application::{
-    CancelEvaluation, ClaimTask, ControlPlane, CreateEvaluation, Decision, RetryExpired,
-    StageContext, StageExecution, StageExecutor, StoreError, SubmitResult,
+    CancelEvaluation, ClaimTask, ControlPlane, CreateEvaluation, Decision, JudgeClaim, LeasePolicy,
+    RetryExpired, StageContext, StageExecution, StageExecutor, StoreError, SubmitResult,
 };
 use openoj_domain::{
-    AttemptState, Capability, EvaluationState, ExecutorKind, IdempotencyKey, LeaseDuration,
-    LeaseToken, NodeId, ResourceUsage, Score, StageKind, UnixMillis, Verdict,
+    AttemptState, Capability, ClaimOperationId, EvaluationState, ExecutorKind, IdempotencyKey,
+    LeaseDuration, LeaseToken, NodeId, ResourceUsage, Score, StageKind, UnixMillis, Verdict,
 };
 use openoj_protocol::{decode_evaluation_request, encode_evaluation_request};
 use openoj_storage::PostgresEvaluationStore;
@@ -431,6 +431,49 @@ async fn concurrent_claim_has_one_winner_and_expiry_creates_attempt_two(
             ("attempt_retry_02".to_owned(), 2, "queued".to_owned()),
         ]
     );
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn judge_claim_dispatches_only_capability_compatible_tasks(
+    pool: PgPool,
+) -> Result<(), Box<dyn Error>> {
+    let store = PostgresEvaluationStore::from_pool(pool);
+    store.migrate().await?;
+    let algorithm_request = decode_evaluation_request(VALID_REQUEST)?;
+    let mut network_value = distinct_request_value("network_only")?;
+    network_value["required_capabilities"] = serde_json::json!(["network"]);
+    let network_request = decode_evaluation_request(&serde_json::to_vec(&network_value)?)?;
+    let control = ControlPlane::new(store.clone());
+    control
+        .create_evaluation(CreateEvaluation {
+            request: algorithm_request.clone(),
+            created_at: UnixMillis::new(10_000)?,
+        })
+        .await?;
+    control
+        .create_evaluation(CreateEvaluation {
+            request: network_request,
+            created_at: UnixMillis::new(10_001)?,
+        })
+        .await?;
+
+    let command = JudgeClaim {
+        node_id: NodeId::parse("judge_node_01")?,
+        declared_capabilities: vec![Capability::parse("algorithm.batch")?],
+        operation_id: ClaimOperationId::parse("claim_01")?,
+        lease_token: LeaseToken::parse("lease_01")?,
+        now: UnixMillis::new(11_000)?,
+        lease_policy: LeasePolicy::new(LeaseDuration::new(30_000)?, LeaseDuration::new(10_000)?)?,
+    };
+    let lease = store.judge_claim_task(command.clone()).await?;
+
+    assert_eq!(
+        lease.request.evaluation_id(),
+        algorithm_request.evaluation_id()
+    );
+    assert_eq!(lease.node_id.as_str(), "judge_node_01");
+    assert_eq!(store.judge_claim_task(command).await?, lease);
     Ok(())
 }
 

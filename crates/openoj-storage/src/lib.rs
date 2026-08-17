@@ -9,7 +9,7 @@ pub use migration::SUPPORTED_SCHEMA_VERSION;
 
 use openoj_application::StoreError;
 use openoj_application::{
-    CancelEvaluation, ClaimTask, CreateEvaluation, EvaluationSnapshot, EvaluationStore,
+    CancelEvaluation, ClaimTask, CreateEvaluation, EvaluationSnapshot, EvaluationStore, JudgeClaim,
     RetryExpired, StoreFuture, SubmitResult, TaskLease,
 };
 use openoj_domain::EvaluationId;
@@ -72,6 +72,16 @@ impl EvaluationStore for PostgresEvaluationStore {
 }
 
 impl PostgresEvaluationStore {
+    /// Atomically claims one ready task whose requirements are a subset of a judge node's
+    /// declared capabilities.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable [`StoreError`] for unavailable, corrupt, or unavailable task state.
+    pub async fn judge_claim_task(&self, command: JudgeClaim) -> Result<TaskLease, StoreError> {
+        lease::judge_claim_task(&self.pool, command).await
+    }
+
     /// Connects to `PostgreSQL` with an already validated bounded pool size.
     ///
     /// # Errors

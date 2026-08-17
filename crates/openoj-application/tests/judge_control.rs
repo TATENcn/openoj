@@ -1,7 +1,7 @@
 use std::error::Error;
 
-use openoj_application::{LeasePolicy, NodePolicy, NodePolicyError};
-use openoj_domain::{Capability, LeaseDuration, NodeId};
+use openoj_application::{JudgeClaim, LeasePolicy, NodePolicy, NodePolicyError};
+use openoj_domain::{Capability, ClaimOperationId, LeaseDuration, LeaseToken, NodeId, UnixMillis};
 
 fn capability(value: &str) -> Result<Capability, Box<dyn Error>> {
     Ok(Capability::parse(value)?)
@@ -86,5 +86,21 @@ fn node_policy_rejects_an_empty_declared_capability_set() -> Result<(), Box<dyn 
         policy.authorize(&node_id, &[]),
         Err(NodePolicyError::CapabilityDenied)
     );
+    Ok(())
+}
+
+#[test]
+fn judge_claim_carries_only_server_selected_lease_inputs() -> Result<(), Box<dyn Error>> {
+    let claim = JudgeClaim {
+        node_id: node("judge-node-01")?,
+        declared_capabilities: vec![capability("algorithm.batch")?],
+        operation_id: ClaimOperationId::parse("claim_01")?,
+        lease_token: LeaseToken::parse("lease_01")?,
+        now: UnixMillis::new(1_000)?,
+        lease_policy: LeasePolicy::new(LeaseDuration::new(30_000)?, LeaseDuration::new(10_000)?)?,
+    };
+
+    assert_eq!(claim.lease_policy.lease_duration().value(), 30_000);
+    assert_eq!(claim.lease_policy.renew_after().value(), 10_000);
     Ok(())
 }

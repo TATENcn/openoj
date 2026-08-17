@@ -2,8 +2,8 @@ mod control;
 
 pub use control::{
     CancelEvaluation, ClaimTask, ControlPlane, CreateEvaluation, EvaluationSnapshot,
-    EvaluationStore, LeasePolicy, NodePolicy, NodePolicyError, RetryExpired, StoreError,
-    StoreFuture, SubmitResult, TaskLease,
+    EvaluationStore, JudgeClaim, LeasePolicy, NodePolicy, NodePolicyError, RetryExpired,
+    StoreError, StoreFuture, SubmitResult, TaskLease,
 };
 
 use std::error::Error;

@@ -5,8 +5,9 @@ use std::pin::Pin;
 use std::{collections::BTreeMap, collections::BTreeSet};
 
 use openoj_domain::{
-    AttemptId, AttemptState, Capability, EvaluationId, EvaluationRequest, EvaluationResult,
-    EvaluationState, IdempotencyKey, LeaseDuration, LeaseToken, NodeId, UnixMillis,
+    AttemptId, AttemptState, Capability, ClaimOperationId, EvaluationId, EvaluationRequest,
+    EvaluationResult, EvaluationState, IdempotencyKey, LeaseDuration, LeaseToken, NodeId,
+    UnixMillis,
 };
 
 /// P0-C control-plane policy for a lease and its server-scheduled renewal interval.
@@ -128,6 +129,17 @@ impl Display for NodePolicyError {
 }
 
 impl Error for NodePolicyError {}
+
+/// Fully server-derived inputs for one P0-C Judge Control claim transaction.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JudgeClaim {
+    pub node_id: NodeId,
+    pub declared_capabilities: Vec<Capability>,
+    pub operation_id: ClaimOperationId,
+    pub lease_token: LeaseToken,
+    pub now: UnixMillis,
+    pub lease_policy: LeasePolicy,
+}
 
 pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StoreError>> + Send + 'a>>;
 
