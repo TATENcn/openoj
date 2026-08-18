@@ -379,10 +379,15 @@ pub async fn recover_expired(pool: &PgPool, now: UnixMillis) -> Result<u32, Stor
             .map_err(|_| StoreError::CorruptData)?;
         match retry_expired(pool, RetryExpired { now, request: next }).await {
             Ok(_) => recovered = recovered.saturating_add(1),
+            // A concurrent recovery or renewal can move the scanned row off the expired leased
+            // JOIN before `retry_expired` acquires the row lock; PostgreSQL then re-evaluates
+            // the JOIN and drops the stale row, surfacing as NotFound or a state conflict. All
+            // of these mean the row is no longer recoverable and the loop must skip it.
             Err(
                 StoreError::LeaseConflict
                 | StoreError::InvalidTransition
-                | StoreError::IdentityConflict,
+                | StoreError::IdentityConflict
+                | StoreError::NotFound,
             ) => {}
             Err(error) => return Err(error),
         }

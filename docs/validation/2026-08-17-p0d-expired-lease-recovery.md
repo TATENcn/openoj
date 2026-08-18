@@ -47,6 +47,7 @@ git diff --check
 新增回归覆盖：
 - `openoj-domain`：`with_next_attempt` 推进 attempt 身份与编号、更换 idempotency key、保留其余语义。
 - `openoj-storage`：`recover_expired` 扫描+重入队、并发恢复单一获胜、Attempt 历史保留。
+- 并发修复：并发 `recover_expired` 竞争同一租约时，后到的 `retry_expired` 可能因 PostgreSQL 对旧 JOIN 行的重评估返回 `NotFound`；`recover_expired` 将其与状态冲突同等视为"已被处理"并跳过，确保单行单一获胜。
 - `openoj-control-plane` 进程级：真实 sweeper 恢复过期租约并被新节点完成终态。
 
 ## 配置新增（control-plane env，均有界）
