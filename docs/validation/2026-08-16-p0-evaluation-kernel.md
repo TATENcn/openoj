@@ -17,7 +17,7 @@ references:
 
 - 范围：`FR-SUBMISSION-001`、`FR-EVAL-001`、`FR-RESULT-001`、`FR-PROFILE-001` 的首个内存实现，以及 `ACC-P0-012`、`ACC-P0-013`、`ACC-P0-016` 的早期机械覆盖。
 - 修订：功能 commit `5cfe15ac4e4be58c3b4cdff5cfbcae20480f285d`；远端验证针对 PR [#1](https://github.com/TATENcn/openoj/pull/1) head `16d4322b68832ed4381c84ec86421e269b4cbb8f`，包含同一功能 commit 及其 CI/治理提交，基于 `f798729f3f89d37a8ed22e2fe652063a419029a6`。
-- 环境：Arch Linux，Linux `7.1.8-zen1-3-zen`，x86_64，8 vCPU（AMD Ryzen 9 9950X3D，VMware full virtualization），15 GiB RAM；`/dev/kvm` 不存在。
+- 环境：Arch Linux，Linux `7.1.8-zen1-3-zen`，x86_64，8 vCPU（AMD Ryzen 9 9950X3D，VMware full virtualization），15 GiB RAM；`/dev/kvm` 当时不存在（2026-08-18 已可由 `2026-08-18-kvm-firecracker-boot.md` 取代）。
 - 工具：Rust/Cargo 1.97.1、cargo-deny 0.20.2、Python 3.14.7、Bash、ripgrep。
 - 构建：debug 单元、集成和 conformance 测试；不包含 release 性能构建。
 - Firecracker/kernel/rootfs/guest agent/Runtime image：未实现、未运行、无摘要。
