@@ -1,7 +1,7 @@
 ---
-status: Proposed
+status: Accepted
 owners: OpenOJ maintainers
-last_reviewed: 2026-08-18
+last_reviewed: 2026-08-20
 applies_to: execution plane architecture for the P0 vertical slice
 references:
   - 0001-rust-and-firecracker.md
