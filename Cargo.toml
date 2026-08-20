@@ -6,6 +6,7 @@ members = [
     "apps/openoj-judge-node",
     "crates/openoj-application",
     "crates/openoj-domain",
+    "crates/openoj-guest-protocol",
     "crates/openoj-judge-core",
     "crates/openoj-judge-protocol",
     "crates/openoj-protocol",

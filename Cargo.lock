@@ -1241,6 +1241,14 @@ name = "openoj-domain"
 version = "0.0.0"
 
 [[package]]
+name = "openoj-guest-protocol"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "openoj-judge-core"
 version = "0.0.0"
 dependencies = [
