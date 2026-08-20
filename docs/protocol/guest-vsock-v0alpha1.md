@@ -22,8 +22,8 @@ references:
 - 每个 JSON body 必须含字符串 `type`（≤32 字节）与 `version = "v0alpha1"`；
   缺失、未知或过长 type 以及版本不匹配被拒绝（fail closed）。
 - `openoj-guest-protocol` crate 是唯一 wire 事实源；禁止手写第二份漂移类型。
-- 字段级最大：capability 数 `32`、每个 capability `32` 字节、inline
-  input/evidence `262_144` 字节、参数数 `32`、单参数 `256` 字节、诊断数 `32`、
+- 字段级最大：capability 数 `32`、每个 capability `32` 字节、digest `64` 字节、
+  inline input/evidence `262_144` 字节、参数数 `32`、单参数 `256` 字节、诊断数 `32`、
   单诊断 `4096` 字节（超限截断并标记 `truncated`）。
 
 ## 消息表

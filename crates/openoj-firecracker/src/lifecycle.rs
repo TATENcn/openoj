@@ -199,10 +199,7 @@ impl Lifecycle {
                 self.phase = VmPhase::Terminated;
                 Ok(())
             }
-            VmPhase::Launching
-            | VmPhase::Configuring
-            | VmPhase::Started
-            | VmPhase::Running => {
+            VmPhase::Launching | VmPhase::Configuring | VmPhase::Started | VmPhase::Running => {
                 self.teardowns += 1;
                 self.phase = VmPhase::Terminating;
                 Ok(())

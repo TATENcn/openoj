@@ -76,8 +76,7 @@ impl FirecrackerVm {
             message: "lifecycle cannot launch".to_owned(),
         })?;
         if production && self.config.jailer_path().is_none() {
-            self.lifecycle
-                .fail_with(TeardownReason::ControlApi);
+            self.lifecycle.fail_with(TeardownReason::ControlApi);
             return Err(FirecrackerError::ProductionRequiresJailer);
         }
 
@@ -248,7 +247,7 @@ impl FirecrackerVm {
             &serde_json::json!({
                 "vcpu_count": self.config.machine().vcpu_count(),
                 "mem_size_mib": self.config.machine().mem_size_mib(),
-                "ht_enabled": false,
+                "smt": false,
                 "track_dirty_pages": false
             }),
         )
@@ -260,9 +259,9 @@ impl FirecrackerVm {
             "PUT",
             "/vsock",
             &serde_json::json!({
+                "vsock_id": "vsock0",
                 "guest_cid": self.config.vsock().guest_cid(),
-                "udp_tx_queue_size": 256,
-                "udp_rx_queue_size": 256
+                "uds_path": self.config.vsock_uds_path()
             }),
         )
         .await
@@ -289,7 +288,7 @@ impl FirecrackerVm {
             });
         }
         GuestChannel::connect(
-            self.config.vsock().guest_cid(),
+            self.config.vsock_uds_path(),
             self.config.vsock().port(),
             crate::vsock::DEFAULT_READ_TIMEOUT,
         )
@@ -304,9 +303,11 @@ impl FirecrackerVm {
         if self.lifecycle.phase() == VmPhase::Terminated {
             return Ok(());
         }
-        self.lifecycle.teardown().map_err(|phase| FirecrackerError::Io {
-            message: format!("cannot tear down from {phase}"),
-        })?;
+        self.lifecycle
+            .teardown()
+            .map_err(|phase| FirecrackerError::Io {
+                message: format!("cannot tear down from {phase}"),
+            })?;
         if let Some(mut child) = self.child.take() {
             let _ = child.kill().await;
             let _ = child.wait().await;
@@ -332,9 +333,7 @@ impl Drop for FirecrackerVm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        FirecrackerConfigParts, MachineConfig, ResourceLimits, VsockConfig,
-    };
+    use crate::config::{FirecrackerConfigParts, MachineConfig, ResourceLimits, VsockConfig};
 
     fn fixture_config() -> Result<FirecrackerConfig, FirecrackerError> {
         FirecrackerConfig::from_parts(FirecrackerConfigParts {
@@ -346,6 +345,7 @@ mod tests {
             machine: MachineConfig::new(1, 128)?,
             limits: ResourceLimits::default(),
             vsock: VsockConfig::new(3, 8266)?,
+            vsock_uds_path: "/tmp/vsock.sock".into(),
             jailer_path: None,
         })
     }

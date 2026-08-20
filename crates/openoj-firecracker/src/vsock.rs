@@ -1,12 +1,18 @@
-//! Host-side `AF_VSOCK` channel to the guest agent.
+//! Host-side vsock channel to the guest agent.
 //!
-//! The host connects to the guest context identifier on the configured port and
-//! exchanges bounded, versioned [`openoj_guest_protocol::Message`] frames. I/O
-//! is blocking because the judge node runs a single worker; the executor calls
-//! this from a blocking context. Reads carry a timeout so an unresponsive guest
-//! converges to a deterministic failure instead of hanging the worker.
+//! With Firecracker 1.16 the host↔guest vsock device is bridged through a
+//! host unix socket (`uds_path`). To reach the guest agent the host connects to
+//! that unix socket, issues `CONNECT <port>\n`, and then exchanges bounded,
+//! versioned [`openoj_guest_protocol::Message`] frames over the bridged
+//! connection. The guest agent itself listens on `AF_VSOCK` at that port.
+//!
+//! The judge node runs a single worker, so I/O here is blocking; the executor
+//! invokes it from a blocking context. Reads carry a timeout so an unresponsive
+//! guest converges to a deterministic failure instead of hanging the worker.
 
-use std::io::{Read, Write};
+use std::io::{Error as IoError, Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::time::Duration;
 
 use openoj_guest_protocol::{CodecError, MAX_FRAME_BYTES, Message};
@@ -16,24 +22,45 @@ use crate::config::FirecrackerError;
 /// Default guest read timeout; an unresponsive guest fails closed.
 pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// A connected, bounded host↔guest vsock channel.
+/// Firecracker's success reply prefix to a `CONNECT` request.
+const CONNECT_OK_PREFIX: &str = "OK ";
+
+/// A connected, bounded host↔guest vsock channel bridged over a firecracker UDS.
 pub struct GuestChannel {
-    stream: vsock::VsockStream,
+    stream: UnixStream,
     read_timeout: Duration,
 }
 
 impl GuestChannel {
-    /// Connects to the guest agent at `cid:port`.
+    /// Connects to the guest agent at `uds_path:port`.
     ///
     /// # Errors
     ///
-    /// Returns [`FirecrackerError::Io`] when the `AF_VSOCK` connection or timeout
-    /// configuration fails.
-    pub fn connect(cid: u32, port: u32, read_timeout: Duration) -> Result<Self, FirecrackerError> {
-        let stream = vsock::VsockStream::connect_with_cid_port(cid, port)
+    /// Returns [`FirecrackerError::Io`] when the unix connection, the `CONNECT`
+    /// handshake, or the read-timeout configuration fails.
+    pub fn connect(
+        uds_path: &Path,
+        port: u32,
+        read_timeout: Duration,
+    ) -> Result<Self, FirecrackerError> {
+        let mut stream = UnixStream::connect(uds_path).map_err(|error| FirecrackerError::Io {
+            message: format!("vsock unix connect failed: {error}"),
+        })?;
+        let handshake = format!("CONNECT {port}\n");
+        stream
+            .write_all(handshake.as_bytes())
             .map_err(|error| FirecrackerError::Io {
-                message: format!("vsock connect to {cid}:{port} failed: {error}"),
+                message: format!("vsock CONNECT write failed: {error}"),
             })?;
+        let mut line = String::new();
+        read_line(&mut stream, &mut line).map_err(|error| FirecrackerError::Io {
+            message: format!("vsock CONNECT reply failed: {error}"),
+        })?;
+        if !line.starts_with(CONNECT_OK_PREFIX) {
+            return Err(FirecrackerError::Io {
+                message: format!("vsock CONNECT rejected: {line}"),
+            });
+        }
         stream
             .set_read_timeout(Some(read_timeout))
             .map_err(|error| FirecrackerError::Io {
@@ -91,6 +118,27 @@ impl GuestChannel {
     }
 }
 
+fn read_line<R: Read>(reader: &mut R, out: &mut String) -> Result<(), IoError> {
+    let mut buf = [0u8; 1];
+    let mut previous = b'\n';
+    loop {
+        let read = reader.read(&mut buf)?;
+        if read == 0 {
+            return Ok(());
+        }
+        let byte = buf[0];
+        if previous == b'\r' && byte == b'\n' {
+            // Strip a trailing CRLF from the prior CR.
+            out.pop();
+        }
+        previous = byte;
+        if byte == b'\n' {
+            return Ok(());
+        }
+        out.push(byte as char);
+    }
+}
+
 fn read_length(length_buf: [u8; 4]) -> Result<usize, FirecrackerError> {
     let length = u32::from_be_bytes(length_buf) as usize;
     if length > MAX_FRAME_BYTES.saturating_sub(4) {
@@ -128,16 +176,10 @@ fn read_frame<R: Read>(reader: &mut R) -> Result<Message, FirecrackerError> {
     Message::decode(&frame).map_err(|e| map_codec(&e))
 }
 
-impl Drop for GuestChannel {
-    fn drop(&mut self) {
-        let _ = self.stream.flush();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openoj_guest_protocol::Stage;
+    use openoj_guest_protocol::{GuestUsage, Stage};
 
     #[test]
     fn oversized_frame_length_is_rejected() {
@@ -148,8 +190,6 @@ mod tests {
 
     #[test]
     fn guest_channel_roundtrip_over_loopback_io() -> Result<(), Box<dyn std::error::Error>> {
-        // Drive send/recv through an in-memory pipe using the frame helpers plus
-        // the ordinary message codec to prove framing on both sides.
         let message = Message::Negotiate {
             capabilities: vec!["algorithm.batch".to_owned()],
         };
@@ -165,9 +205,10 @@ mod tests {
         let message = Message::StageOutput {
             stage: Stage::Build,
             exit_code: 0,
-            output_digest: "sha256:o".to_owned(),
+            output_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .to_owned(),
             output_bytes: 3,
-            usage: openoj_guest_protocol::GuestUsage::default(),
+            usage: GuestUsage::default(),
             diagnostics: Vec::new(),
         };
         let encoded = message.encode()?;
@@ -182,5 +223,15 @@ mod tests {
         let mut sink: &[u8] = &[0, 0, 0, 8, 1, 2];
         let result = read_frame(&mut sink);
         assert!(matches!(result, Err(FirecrackerError::Io { .. })));
+    }
+
+    #[test]
+    fn connect_reply_line_is_parsed() -> Result<(), Box<dyn std::error::Error>> {
+        // Simulate Firecracker's reply over an in-memory reader.
+        let mut reply: &[u8] = b"OK 1073741824\n";
+        let mut line = String::new();
+        read_line(&mut reply, &mut line)?;
+        assert!(line.starts_with(CONNECT_OK_PREFIX));
+        Ok(())
     }
 }

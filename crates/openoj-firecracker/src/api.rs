@@ -113,7 +113,10 @@ impl BoundedReader {
 
     fn push(&mut self, byte: u8) -> Result<(), IoError> {
         if self.buffer.len() >= self.maximum {
-            return Err(IoError::new(ErrorKind::InvalidData, "response exceeds bound"));
+            return Err(IoError::new(
+                ErrorKind::InvalidData,
+                "response exceeds bound",
+            ));
         }
         self.buffer.push(byte);
         Ok(())
@@ -137,7 +140,10 @@ impl BoundedReader {
     }
 }
 
-async fn read_response<R: AsyncReadExt + Unpin>(reader: &mut R, out: &mut BoundedReader) -> Result<(), IoError> {
+async fn read_response<R: AsyncReadExt + Unpin>(
+    reader: &mut R,
+    out: &mut BoundedReader,
+) -> Result<(), IoError> {
     let mut header_done = false;
     let mut body_remaining: Option<usize> = None;
     let mut byte = [0u8; 1];
@@ -155,7 +161,10 @@ async fn read_response<R: AsyncReadExt + Unpin>(reader: &mut R, out: &mut Bounde
         }
     }
     if !header_done {
-        return Err(IoError::new(ErrorKind::InvalidData, "headers not terminated"));
+        return Err(IoError::new(
+            ErrorKind::InvalidData,
+            "headers not terminated",
+        ));
     }
 
     // Determine content length from headers.
@@ -169,7 +178,10 @@ async fn read_response<R: AsyncReadExt + Unpin>(reader: &mut R, out: &mut Bounde
     });
     if let Some(length) = content_length {
         if length > out.maximum.saturating_sub(out.buffer.len()) {
-            return Err(IoError::new(ErrorKind::InvalidData, "content-length exceeds bound"));
+            return Err(IoError::new(
+                ErrorKind::InvalidData,
+                "content-length exceeds bound",
+            ));
         }
         body_remaining = Some(length);
     }

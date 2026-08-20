@@ -10,7 +10,6 @@ openoj-guest-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt", "process", "time", "io-util", "sync", "fs"] }
-vsock = "=0.5.4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

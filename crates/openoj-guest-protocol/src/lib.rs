@@ -25,6 +25,9 @@ pub const MAX_CAPABILITIES: usize = 32;
 /// Maximum length of a single capability string.
 pub const MAX_CAPABILITY_LEN: usize = 32;
 
+/// Maximum length of a content digest string (a 64-hex SHA-256).
+pub const MAX_DIGEST_LEN: usize = 64;
+
 /// Maximum inline input/evidence payload carried by a frame.
 pub const MAX_INLINE_BYTES: usize = 262_144;
 
@@ -365,8 +368,8 @@ impl Message {
                 bytes,
             } => {
                 check_name(name)?;
-                if digest.len() > MAX_CAPABILITY_LEN {
-                    return Err(bounds("digest", digest.len(), MAX_CAPABILITY_LEN));
+                if digest.len() > MAX_DIGEST_LEN {
+                    return Err(bounds("digest", digest.len(), MAX_DIGEST_LEN));
                 }
                 if bytes.len() > MAX_INLINE_BYTES {
                     return Err(bounds("bytes", bytes.len(), MAX_INLINE_BYTES));
@@ -394,12 +397,8 @@ impl Message {
                 usage,
                 diagnostics,
             } => {
-                if output_digest.len() > MAX_CAPABILITY_LEN {
-                    return Err(bounds(
-                        "output_digest",
-                        output_digest.len(),
-                        MAX_CAPABILITY_LEN,
-                    ));
+                if output_digest.len() > MAX_DIGEST_LEN {
+                    return Err(bounds("output_digest", output_digest.len(), MAX_DIGEST_LEN));
                 }
                 if diagnostics.len() > MAX_DIAGNOSTICS {
                     return Err(bounds("diagnostics", diagnostics.len(), MAX_DIAGNOSTICS));
@@ -494,7 +493,7 @@ impl Message {
             }
             TYPE_UPLOAD_INPUT => {
                 let name = string_field(object, "name", MAX_NAME_LEN)?;
-                let digest = string_field(object, "digest", MAX_CAPABILITY_LEN)?;
+                let digest = string_field(object, "digest", MAX_DIGEST_LEN)?;
                 let bytes = byte_field(object, "bytes")?;
                 Ok(Self::UploadInput {
                     name,
@@ -514,7 +513,7 @@ impl Message {
             TYPE_STAGE_OUTPUT => {
                 let stage = Stage::parse(string_field(object, "stage", MAX_TYPE_LEN)?.as_str())?;
                 let exit_code = i32_field(object, "exit_code")?;
-                let output_digest = string_field(object, "output_digest", MAX_CAPABILITY_LEN)?;
+                let output_digest = string_field(object, "output_digest", MAX_DIGEST_LEN)?;
                 let output_bytes = u64_field(object, "output_bytes")?;
                 let usage = usage_from(object.get("usage").ok_or(CodecError::MalformedJson)?)?;
                 let diagnostics =

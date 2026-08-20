@@ -44,30 +44,19 @@ pub enum FirecrackerError {
         actual: u64,
     },
     /// A required path is not absolute.
-    NonAbsolutePath {
-        field: &'static str,
-    },
+    NonAbsolutePath { field: &'static str },
     /// A required runtime image digest is missing.
-    MissingDigest {
-        field: &'static str,
-    },
+    MissingDigest { field: &'static str },
     /// The jailer binary path is required but absent.
     MissingJailer,
     /// A resource limit is inconsistent (period zero or quota with no period).
-    InvalidResourceLimit {
-        field: &'static str,
-    },
+    InvalidResourceLimit { field: &'static str },
     /// The production profile requires jailer isolation.
     ProductionRequiresJailer,
     /// The Firecracker control API returned a non-2xx status.
-    ControlApi {
-        status: u16,
-        detail: String,
-    },
+    ControlApi { status: u16, detail: String },
     /// A low-level I/O operation failed (process, socket, or control API).
-    Io {
-        message: String,
-    },
+    Io { message: String },
 }
 
 impl From<std::io::Error> for FirecrackerError {
@@ -98,7 +87,9 @@ impl std::fmt::Display for FirecrackerError {
                 formatter,
                 "{field} must be within {minimum}..={maximum}, got {actual}"
             ),
-            Self::NonAbsolutePath { field } => write!(formatter, "{field} must be an absolute path"),
+            Self::NonAbsolutePath { field } => {
+                write!(formatter, "{field} must be an absolute path")
+            }
             Self::MissingDigest { field } => write!(formatter, "{field} image digest is required"),
             Self::MissingJailer => write!(formatter, "jailer binary path is required"),
             Self::InvalidResourceLimit { field } => {
@@ -108,7 +99,10 @@ impl std::fmt::Display for FirecrackerError {
                 write!(formatter, "production profile requires jailer isolation")
             }
             Self::ControlApi { status, detail } => {
-                write!(formatter, "Firecracker control API returned {status}: {detail}")
+                write!(
+                    formatter,
+                    "Firecracker control API returned {status}: {detail}"
+                )
             }
             Self::Io { message } => write!(formatter, "I/O error: {message}"),
         }
@@ -246,7 +240,9 @@ impl ResourceLimits {
     /// without a nonzero period.
     pub fn validate(self) -> Result<(), FirecrackerError> {
         match (self.cpu_quota_us, self.cpu_period_us) {
-            (Some(_), Some(0) | None) => Err(FirecrackerError::InvalidResourceLimit { field: "cpu" }),
+            (Some(_), Some(0) | None) => {
+                Err(FirecrackerError::InvalidResourceLimit { field: "cpu" })
+            }
             _ => Ok(()),
         }
     }
@@ -306,6 +302,7 @@ pub struct FirecrackerConfig {
     machine: MachineConfig,
     limits: ResourceLimits,
     vsock: VsockConfig,
+    vsock_uds_path: PathBuf,
     jailer_path: Option<PathBuf>,
 }
 
@@ -328,6 +325,8 @@ pub struct FirecrackerConfigParts {
     pub limits: ResourceLimits,
     /// Guest vsock device configuration.
     pub vsock: VsockConfig,
+    /// Absolute host unix-socket path Firecracker bridges to the guest vsock.
+    pub vsock_uds_path: PathBuf,
     /// Optional jailer binary; `Some` is required for the production profile.
     pub jailer_path: Option<PathBuf>,
 }
@@ -357,6 +356,7 @@ impl FirecrackerConfig {
         if let Some(path) = &parts.jailer_path {
             require_absolute(path, "jailer_path")?;
         }
+        require_absolute(&parts.vsock_uds_path, "vsock_uds_path")?;
         Ok(Self {
             kernel_path,
             kernel_digest,
@@ -366,6 +366,7 @@ impl FirecrackerConfig {
             machine: parts.machine,
             limits: parts.limits,
             vsock: parts.vsock,
+            vsock_uds_path: parts.vsock_uds_path,
             jailer_path: parts.jailer_path,
         })
     }
@@ -418,6 +419,12 @@ impl FirecrackerConfig {
         self.vsock
     }
 
+    /// Absolute host unix-socket path Firecracker bridges to the guest vsock.
+    #[must_use]
+    pub fn vsock_uds_path(&self) -> &Path {
+        &self.vsock_uds_path
+    }
+
     /// Optional jailer binary; `Some` is required for the production profile.
     #[must_use]
     pub fn jailer_path(&self) -> Option<&Path> {
@@ -443,6 +450,7 @@ mod tests {
             machine: MachineConfig::new(1, 128)?,
             limits: ResourceLimits::default(),
             vsock: VsockConfig::new(DEFAULT_GUEST_CID, DEFAULT_GUEST_PORT)?,
+            vsock_uds_path: "/tmp/vsock.sock".into(),
             jailer_path: None,
         })
     }
@@ -466,7 +474,9 @@ mod tests {
         let result = FirecrackerConfig::from_parts(parts);
         assert_eq!(
             result,
-            Err(FirecrackerError::NonAbsolutePath { field: "kernel_path" })
+            Err(FirecrackerError::NonAbsolutePath {
+                field: "kernel_path"
+            })
         );
         Ok(())
     }

@@ -30,8 +30,7 @@ fn kvm_available() -> bool {
         && Command::new("firecracker")
             .arg("--version")
             .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+            .is_ok_and(|output| output.status.success())
 }
 
 fn config() -> Result<Option<FirecrackerConfig>, FirecrackerError> {
@@ -52,6 +51,7 @@ fn config() -> Result<Option<FirecrackerConfig>, FirecrackerError> {
         machine: MachineConfig::new(1, 128)?,
         limits: ResourceLimits::default(),
         vsock: VsockConfig::new(3, 8266)?,
+        vsock_uds_path: PathBuf::from("/tmp/openoj-fc-vsock.sock"),
         jailer_path: None,
     })
     .map(Some)
@@ -71,11 +71,8 @@ async fn boots_a_real_microvm_and_reclaims_it() -> Result<(), Box<dyn std::error
     let work = env::temp_dir().join(format!("openoj-fc-boot-{}", std::process::id()));
     tokio::fs::create_dir_all(&work).await?;
     let api_socket = work.join("fc.sock");
-    let mut vm = openoj_firecracker::FirecrackerVm::new(
-        config,
-        "/usr/bin/firecracker",
-        &api_socket,
-    );
+    let mut vm =
+        openoj_firecracker::FirecrackerVm::new(config, "/usr/bin/firecracker", &api_socket);
     vm.bootstrap(false).await?;
     assert!(vm.can_communicate(), "microVM did not reach started phase");
 
