@@ -28,7 +28,7 @@ crates/
   openoj-application/       # 已实现
   openoj-storage/           # 已实现
   openoj-scheduler/         # 规划中
-  openoj-evaluator/         # 规划中
+  openoj-evaluator/         # 已实现：宿主侧阶段映射与结构化 check
   openoj-firecracker/       # 已实现：jailer/VMM/vsock/control-API 系统适配器
   openoj-plugin-host/       # 规划中
   openoj-observability/     # 规划中

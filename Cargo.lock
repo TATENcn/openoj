@@ -1269,6 +1269,15 @@ name = "openoj-domain"
 version = "0.0.0"
 
 [[package]]
+name = "openoj-evaluator"
+version = "0.0.0"
+dependencies = [
+ "openoj-application",
+ "openoj-domain",
+ "openoj-guest-protocol",
+]
+
+[[package]]
 name = "openoj-firecracker"
 version = "0.0.0"
 dependencies = [
