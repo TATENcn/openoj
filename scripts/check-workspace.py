@@ -29,6 +29,9 @@ ALLOWED_WORKSPACE_EDGES = {
         ("openoj-guest-protocol", "normal"),
     },
     "openoj-guest-protocol": set(),
+    "openoj-guest-agent": {
+        ("openoj-guest-protocol", "normal"),
+    },
     "openoj-judge-core": {
         ("openoj-application", "normal"),
         ("openoj-domain", "normal"),

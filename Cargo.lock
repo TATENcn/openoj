@@ -1280,6 +1280,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openoj-guest-agent"
+version = "0.0.0"
+dependencies = [
+ "openoj-guest-protocol",
+ "sha2 0.10.8",
+ "vsock",
+]
+
+[[package]]
 name = "openoj-guest-protocol"
 version = "0.0.0"
 dependencies = [
@@ -1937,9 +1946,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.10.9"
+version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+checksum = "793db75ad2bcafc3ffa7c68b215fee268f537982cd901d132f89c6343f3a3dc8"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
@@ -2047,7 +2056,7 @@ dependencies = [
  "rustls-native-certs",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.10.8",
  "smallvec",
  "thiserror",
  "tokio",
@@ -2084,7 +2093,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.10.8",
  "sqlx-core",
  "sqlx-postgres",
  "syn 2.0.119",

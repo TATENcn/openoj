@@ -7,6 +7,7 @@ members = [
     "crates/openoj-application",
     "crates/openoj-domain",
     "crates/openoj-firecracker",
+    "crates/openoj-guest-agent",
     "crates/openoj-guest-protocol",
     "crates/openoj-judge-core",
     "crates/openoj-judge-protocol",
@@ -25,6 +26,7 @@ hex = "=0.4.3"
 openoj-application = { path = "crates/openoj-application" }
 openoj-domain = { path = "crates/openoj-domain" }
 openoj-guest-protocol = { path = "crates/openoj-guest-protocol" }
+openoj-guest-agent = { path = "crates/openoj-guest-agent" }
 openoj-judge-core = { path = "crates/openoj-judge-core" }
 openoj-judge-protocol = { path = "crates/openoj-judge-protocol" }
 openoj-protocol = { path = "crates/openoj-protocol" }
