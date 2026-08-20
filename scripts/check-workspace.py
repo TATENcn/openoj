@@ -45,6 +45,9 @@ ALLOWED_WORKSPACE_EDGES = {
     "openoj-judge-node": {
         ("openoj-application", "normal"),
         ("openoj-domain", "normal"),
+        ("openoj-evaluator", "normal"),
+        ("openoj-firecracker", "normal"),
+        ("openoj-guest-protocol", "normal"),
         ("openoj-judge-core", "normal"),
         ("openoj-judge-protocol", "normal"),
         ("openoj-protocol", "normal"),

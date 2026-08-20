@@ -1,8 +1,13 @@
-//! P0-C Judge Node UDS client and explicit development-only worker assembly.
+//! P0-C/P0-D Judge Node UDS client and worker assembly.
+
+pub mod firecracker_executor;
 
 use std::fmt::{self, Display, Formatter};
 use std::path::Path;
 
+pub use firecracker_executor::{
+    FirecrackerExecutor, FirecrackerExecutorConfig, FirecrackerGuestSession, GuestSession,
+};
 use openoj_application::{JudgeRenewDirective, StoreError, TaskLease};
 use openoj_domain::{
     Capability, ClaimOperationId, EvaluationResult, LeaseDuration, LeaseToken, NodeId,

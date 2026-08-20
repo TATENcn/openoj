@@ -27,6 +27,7 @@ hex = "=0.4.3"
 openoj-application = { path = "crates/openoj-application" }
 openoj-domain = { path = "crates/openoj-domain" }
 openoj-evaluator = { path = "crates/openoj-evaluator" }
+openoj-firecracker = { path = "crates/openoj-firecracker" }
 openoj-guest-protocol = { path = "crates/openoj-guest-protocol" }
 openoj-guest-agent = { path = "crates/openoj-guest-agent" }
 openoj-judge-core = { path = "crates/openoj-judge-core" }
