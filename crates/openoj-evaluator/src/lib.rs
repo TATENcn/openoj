@@ -56,7 +56,8 @@ pub fn diagnostics_from_guest(
         .map(|value| {
             // Domain diagnostic codes are uppercase ASCII tokens.
             let code = DiagnosticCode::parse(value.code().to_uppercase())?;
-            Diagnostic::new(code, value.message(), value.truncated()).map_err(ApplicationError::from)
+            Diagnostic::new(code, value.message(), value.truncated())
+                .map_err(ApplicationError::from)
         })
         .collect()
 }
@@ -71,8 +72,15 @@ fn content_digest(guest_digest: &str) -> Result<ContentDigest, ApplicationError>
 ///
 /// Returns [`ApplicationError`] when an identifier, digest, or media type is
 /// invalid, or the declared size exceeds the protocol limit.
-pub fn stdout_evidence(guest_digest: &str, output_bytes: u64) -> Result<EvidenceRef, ApplicationError> {
-    build_evidence(EvidenceKind::parse(EVIDENCE_STDOUT)?, guest_digest, output_bytes)
+pub fn stdout_evidence(
+    guest_digest: &str,
+    output_bytes: u64,
+) -> Result<EvidenceRef, ApplicationError> {
+    build_evidence(
+        EvidenceKind::parse(EVIDENCE_STDOUT)?,
+        guest_digest,
+        output_bytes,
+    )
 }
 
 fn build_evidence(
@@ -150,10 +158,7 @@ pub fn execution_for_stage_output(
     let usage = usage_from_guest(usage)?;
     let diagnostics = diagnostics_from_guest(guest_diagnostics)?;
     let evidence = match stage {
-        StageKind::Build | StageKind::Run => vec![stdout_evidence(
-            guest_digest,
-            output_bytes,
-        )?],
+        StageKind::Build | StageKind::Run => vec![stdout_evidence(guest_digest, output_bytes)?],
         _ => Vec::new(),
     };
 
@@ -261,7 +266,10 @@ mod tests {
     fn stdout_evidence_is_content_addressed() -> Result<(), Box<dyn std::error::Error>> {
         let evidence = stdout_evidence(DIGEST, 4)?;
         let artifact = evidence.artifact().ok_or("missing artifact")?;
-        assert_eq!(artifact.digest().as_str(), "sha256:abababababababababababababababababababababababababababababababab");
+        assert_eq!(
+            artifact.digest().as_str(),
+            "sha256:abababababababababababababababababababababababababababababababab"
+        );
         Ok(())
     }
 }

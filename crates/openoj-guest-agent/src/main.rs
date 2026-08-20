@@ -7,7 +7,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use openoj_guest_agent::{serve_frame, DEFAULT_WORK_DIR};
+use openoj_guest_agent::{DEFAULT_WORK_DIR, serve_frame};
 
 /// Default vsock port the agent listens on (matches the firecracker crate).
 pub const DEFAULT_GUEST_PORT: u32 = 8266;
@@ -17,8 +17,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(DEFAULT_GUEST_PORT);
-    let work = env::var("OPENOJ_WORK_DIR")
-        .map_or_else(|_| PathBuf::from(DEFAULT_WORK_DIR), PathBuf::from);
+    let work =
+        env::var("OPENOJ_WORK_DIR").map_or_else(|_| PathBuf::from(DEFAULT_WORK_DIR), PathBuf::from);
     std::fs::create_dir_all(&work)?;
 
     let listener = vsock::VsockListener::bind_with_cid_port(vsock::VMADDR_CID_ANY, port)?;

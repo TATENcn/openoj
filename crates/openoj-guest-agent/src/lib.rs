@@ -33,19 +33,13 @@ pub const TIMEOUT_EXIT_CODE: i32 = 124;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgentError {
     /// An I/O operation failed inside the guest.
-    Io {
-        message: String,
-    },
+    Io { message: String },
     /// The command argument vector was empty.
     EmptyArgv,
     /// The uploaded input name refers outside the task input directory.
-    UnsafeName {
-        name: String,
-    },
+    UnsafeName { name: String },
     /// An unexpected message type was received from the host.
-    UnexpectedMessage {
-        message_type: &'static str,
-    },
+    UnexpectedMessage { message_type: &'static str },
 }
 
 impl std::fmt::Display for AgentError {
@@ -98,18 +92,12 @@ pub fn handle(message: Message, work: &Path) -> Result<Option<Message>, AgentErr
                 accepted: true,
             }))
         }
-        Message::Build { argv, wall_time_ms } => Ok(Some(stage_output(
-            Stage::Build,
-            &argv,
-            work,
-            wall_time_ms,
-        )?)),
-        Message::Run { argv, wall_time_ms } => Ok(Some(stage_output(
-            Stage::Run,
-            &argv,
-            work,
-            wall_time_ms,
-        )?)),
+        Message::Build { argv, wall_time_ms } => {
+            Ok(Some(stage_output(Stage::Build, &argv, work, wall_time_ms)?))
+        }
+        Message::Run { argv, wall_time_ms } => {
+            Ok(Some(stage_output(Stage::Run, &argv, work, wall_time_ms)?))
+        }
         Message::StageEvidence { kind } => Ok(Some(Message::EvidenceAck {
             kind,
             accepted: true,
@@ -154,7 +142,8 @@ fn run_command(
     argv: &[String],
     work: &Path,
     wall_time_ms: u64,
-) -> Result<StageOutputParts, AgentError> {    if argv.is_empty() {
+) -> Result<StageOutputParts, AgentError> {
+    if argv.is_empty() {
         return Err(AgentError::EmptyArgv);
     }
     let started = Instant::now();
@@ -228,10 +217,7 @@ struct CommandOutput {
     stderr: Vec<u8>,
 }
 
-fn wait_with_timeout(
-    mut child: Child,
-    budget: Duration,
-) -> Result<CommandOutput, AgentError> {
+fn wait_with_timeout(mut child: Child, budget: Duration) -> Result<CommandOutput, AgentError> {
     let start = Instant::now();
     loop {
         if let Some(status) = child.try_wait()? {
@@ -268,11 +254,9 @@ fn read_pipe<R: Read>(reader: Option<&mut R>, limit: usize) -> Result<Vec<u8>, A
     let mut out = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
-        let read = reader
-            .read(&mut buf)
-            .map_err(|error| AgentError::Io {
-                message: error.to_string(),
-            })?;
+        let read = reader.read(&mut buf).map_err(|error| AgentError::Io {
+            message: error.to_string(),
+        })?;
         if read == 0 {
             break;
         }
@@ -341,9 +325,10 @@ pub fn serve_frame<S: Read + Write>(stream: &mut S, work: &Path) -> Result<bool,
         .map_err(|error| AgentError::Io {
             message: error.to_string(),
         })?;
-    let message = openoj_guest_protocol::Message::decode(&frame).map_err(|error| AgentError::Io {
-        message: format!("decode {error}"),
-    })?;
+    let message =
+        openoj_guest_protocol::Message::decode(&frame).map_err(|error| AgentError::Io {
+            message: format!("decode {error}"),
+        })?;
     let response = handle(message, work)?;
     if let Some(response) = response {
         let response_frame = response.encode().map_err(|error| AgentError::Io {
@@ -360,10 +345,8 @@ mod tests {
     use super::*;
 
     fn work_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "openoj-guest-agent-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("openoj-guest-agent-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).ok();
         dir
     }
@@ -377,10 +360,7 @@ mod tests {
             },
             &work,
         )?;
-        assert_eq!(
-            response,
-            Some(Message::Negotiated { supported: true })
-        );
+        assert_eq!(response, Some(Message::Negotiated { supported: true }));
         Ok(())
     }
 
@@ -393,10 +373,7 @@ mod tests {
             },
             &work,
         )?;
-        assert_eq!(
-            response,
-            Some(Message::Negotiated { supported: false })
-        );
+        assert_eq!(response, Some(Message::Negotiated { supported: false }));
         Ok(())
     }
 
@@ -440,10 +417,7 @@ mod tests {
     #[test]
     fn heartbeat_is_acknowledged() -> Result<(), Box<dyn std::error::Error>> {
         let work = work_dir();
-        assert_eq!(
-            handle(Message::Heartbeat, &work)?,
-            Some(Message::Ack)
-        );
+        assert_eq!(handle(Message::Heartbeat, &work)?, Some(Message::Ack));
         Ok(())
     }
 
@@ -467,18 +441,17 @@ mod tests {
         )?;
         assert_eq!(parts.exit_code, 0);
         assert_eq!(parts.output_digest, hex(Sha256::digest(b"okwarn")));
-        assert_eq!(parts.diagnostics.first().map(GuestDiagnostic::message), Some("warn"));
+        assert_eq!(
+            parts.diagnostics.first().map(GuestDiagnostic::message),
+            Some("warn")
+        );
         Ok(())
     }
 
     #[test]
     fn timeout_produces_deterministic_exit() -> Result<(), Box<dyn std::error::Error>> {
         let work = work_dir();
-        let parts = run_command(
-            &["/bin/sleep".to_owned(), "5".to_owned()],
-            &work,
-            50,
-        )?;
+        let parts = run_command(&["/bin/sleep".to_owned(), "5".to_owned()], &work, 50)?;
         assert_eq!(parts.exit_code, TIMEOUT_EXIT_CODE);
         Ok(())
     }
