@@ -32,7 +32,7 @@ flowchart LR
 
 负责 Problem、Problem Version、Submission、Evaluation、用户可见状态、策略、幂等 API、调度意图和审计。控制平面不直接执行不可信命令，也不持有 microVM 内部实现假设。
 
-P0 可以作为一个模块化 Rust 应用部署；只有获得真实扩展、故障域或独立发布需求后才拆分服务。当前 P0-B 已实现 PostgreSQL-backed application port 以及仅包含 migration、提交、状态查询的 CLI 进程组装；P0-C 增加 UDS Judge Control server 与独立 judge node；P0-D 在 control-plane 增加后台 sweeper，周期重入队过期租约，防止强杀后的任务永久停留。HTTP、身份认证和对象正文上传仍未实现。
+P0 可以作为一个模块化 Rust 应用部署；只有获得真实扩展、故障域或独立发布需求后才拆分服务。当前 P0-B 已实现 PostgreSQL-backed application port 以及仅包含 migration、提交、状态查询的 CLI 进程组装；P0-C 增加 UDS Judge Control server 与独立 judge node；P0-D 增加 index 化执行平面地基（vsock codec、jailer/VMM 适配器、guest agent、宿主侧 evaluator 与 judge-node Firecracker executor）。HTTP、身份认证、对象正文上传与任意用户代码执行仍未实现。
 
 ## 评测编排
 
