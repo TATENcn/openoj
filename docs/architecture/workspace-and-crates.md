@@ -12,27 +12,29 @@ references:
 
 以下是首个垂直切片的目标布局；创建 workspace 时可以通过 ADR 调整名称，但不得破坏依赖方向。
 
-P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0-B 增加 `openoj-storage` 和 `openoj-cli`：前者负责 PostgreSQL migration、兼容检查、持久化 transaction 和可靠 task/outbox，后者只组装 migration、提交和状态查询命令。P0-C 增加 `openoj-judge-protocol`、`openoj-judge-core`、`openoj-control-plane` 和 `openoj-judge-node`，交付 UDS gRPC Judge Control 契约、单并发 worker 与显式 development mock，形成真实双进程闭环。未实现组件不创建空 crate，每增加一个 crate 都必须同时交付其边界行为和测试。
+P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0-B 增加 `openoj-storage` 和 `openoj-cli`：前者负责 PostgreSQL migration、兼容检查、持久化 transaction 和可靠 task/outbox，后者只组装 migration、提交和状态查询命令。P0-C 增加 `openoj-judge-protocol`、`openoj-judge-core`、`openoj-control-plane` 和 `openoj-judge-node`，交付 UDS gRPC Judge Control 契约、单并发 worker 与显式 development mock，形成真实双进程闭环。P0-D 增加 `openoj-guest-protocol`（guest↔host vsock 有界消息 codec)、`openoj-firecracker`（jailer/VMM/vsock/control-API 系统适配器）、`openoj-guest-agent`（guest 内受限 vsock 命令 agent）与 `openoj-evaluator`（宿主侧阶段映射与结构化 check），并在 `openoj-judge-node` 组装显式 Firecracker executor（production 须 jailer，fail closed）。未实现组件不创建空 crate，每增加一个 crate 都必须同时交付其边界行为和测试。
 
 ```text
 apps/
   openoj-cli/               # 已实现
   openoj-control-plane/     # 已实现：UDS Judge Control server 组装
-  openoj-judge-node/        # 已实现：UDS client 与显式 development-mock worker 组装
+  openoj-judge-node/        # 已实现：UDS client、development mock 与 Firecracker executor 组装
 crates/
   openoj-domain/            # 已实现
+  openoj-guest-protocol/    # 已实现：guest↔host vsock 有界消息 codec
   openoj-protocol/          # 已实现
   openoj-judge-core/        # 已实现：transport-neutral 单节点 worker 与 development mock
   openoj-judge-protocol/    # 已实现：内部 Judge Control Protobuf/gRPC 契约
   openoj-application/       # 已实现
   openoj-storage/           # 已实现
   openoj-scheduler/         # 规划中
-  openoj-evaluator/         # 规划中
-  openoj-firecracker/       # 规划中
+  openoj-evaluator/         # 已实现：宿主侧阶段映射与结构化 check
+  openoj-firecracker/       # 已实现：jailer/VMM/vsock/control-API 系统适配器
   openoj-plugin-host/       # 规划中
   openoj-observability/     # 规划中
 guest/
-  openoj-guest-agent/       # 规划中
+  openoj-guest-agent/       # 已实现：guest 内受限 vsock 命令 agent
+  openoj-guest-protocol/    # 已实现：guest↔host vsock codec（见上述 crates/）
 
 # 规划中的进程（尚未创建空 crate）
 apps/
@@ -52,6 +54,8 @@ domain <- application <- apps
 
 domain <- judge-protocol -> protocol
 
+guest-protocol   # 与 domain/外部隔离的有界 vsock codec
+
 firecracker <- judge-node
 storage     <- application adapters
 plugin-host <- application capability adapters
@@ -62,6 +66,7 @@ plugin-host <- application capability adapters
 - `openoj-domain` 只包含领域类型、规则和纯逻辑；不得依赖 async runtime、数据库、HTTP、Firecracker 或 UI。
 - `openoj-protocol` 包含 canonical schema 对应类型和兼容转换；不得承载权限或业务决策。
 - `openoj-judge-protocol` 包含内部 Judge Control `.proto`、生成绑定与有界 transport 转换；不得复制 canonical Evaluation 语义、承载授权或依赖数据库。
+- `openoj-guest-protocol` 只包含 guest↔host vsock 消息类型与有界 frame codec；不承载权限、业务决策，不依赖 async runtime、数据库或 Firecracker。
 - `openoj-judge-core` 包含单节点 worker 和显式 development mock executor；不得依赖 Tonic、SQLx、Firecracker 或宿主进程执行 API。
 - `openoj-application` 编排用例并依赖 trait，不依赖具体数据库和 VMM 实现。
 - `openoj-storage` 实现持久化、transaction、outbox 和 migration，不把数据库类型泄漏到 domain。

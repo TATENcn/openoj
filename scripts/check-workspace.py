@@ -25,6 +25,18 @@ ALLOWED_WORKSPACE_EDGES = {
         ("openoj-storage", "normal"),
     },
     "openoj-domain": set(),
+    "openoj-evaluator": {
+        ("openoj-application", "normal"),
+        ("openoj-domain", "normal"),
+        ("openoj-guest-protocol", "normal"),
+    },
+    "openoj-firecracker": {
+        ("openoj-guest-protocol", "normal"),
+    },
+    "openoj-guest-protocol": set(),
+    "openoj-guest-agent": {
+        ("openoj-guest-protocol", "normal"),
+    },
     "openoj-judge-core": {
         ("openoj-application", "normal"),
         ("openoj-domain", "normal"),
@@ -33,6 +45,9 @@ ALLOWED_WORKSPACE_EDGES = {
     "openoj-judge-node": {
         ("openoj-application", "normal"),
         ("openoj-domain", "normal"),
+        ("openoj-evaluator", "normal"),
+        ("openoj-firecracker", "normal"),
+        ("openoj-guest-protocol", "normal"),
         ("openoj-judge-core", "normal"),
         ("openoj-judge-protocol", "normal"),
         ("openoj-protocol", "normal"),
