@@ -31,3 +31,4 @@ references:
 - `2026-08-17-p0c-judge-control.md`：P0-C UDS Judge Control 与真实进程闭环；含失败路径回归。
 - `2026-08-17-p0d-expired-lease-recovery.md`：P0-D 过期租约恢复，sweeper 接入 control-plane 进程路径并验证端到端强杀恢复。
 - `2026-08-18-kvm-firecracker-boot.md`：本机 KVM/Firecracker 启动验证，执行平面目标环境证据起点。
+- `2026-08-21-p0d-runtime-provisioning-vsock-roundtrip.md`：algorithm-c 运行时基础镜像供应（免 root）与真实 KVM guest↔host vsock 往返。

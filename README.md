@@ -6,7 +6,9 @@ OpenOJ 的长期目标不是只提供传统 Online Judge 页面，而是建立�
 
 ## 当前状态
 
-项目已进入 **P0：单机算法题垂直切片** 的早期实现。仓库包含治理与架构基线、schema-first 评测内核、PostgreSQL 持久化控制脊柱（P0-B），以及 control-plane ↔ judge-node 的双进程 UDS 派发闭环（P0-C）。P0-D 增加了 index 化的执行平面地基：有界 vsock 消息 codec、jailer/VMM 系统适配器（能在真实 KVM 上启动并回收 microVM）、受限 guest 命令 agent、宿主侧 evaluator，以及在 judge-node 中组装、production 必须启 jailer 的 Firecracker executor。仓库尚不能编译运行任意用户提交（缺对象存储正文与含工具链的算法 runtime image），不具备 HTTP API 或可发布判题系统。
+项目已进入 **P0：单机算法题垂直切片** 的早期实现。仓库包含治理与架构基线、schema-first 评测内核、PostgreSQL 持久化控制脊柱（P0-B），以及 control-plane ↔ judge-node 的双进程 UDS 派发闭环（P0-C）。P0-D 增加了 index 化的执行平面地基：有界 vsock 消息 codec、jailer/VMM 系统适配器（能在真实 KVM 上启动并回收 microVM）、受限 guest 命令 agent、宿主侧 evaluator，以及在 judge-node 中组装、production 必须启 jailer 的 Firecracker executor。P0-D 进一步供给了 `algorithm-c` 运行时**基础**镜像（不可变 kernel + musl rootfs + 静态 guest agent，免 root 装配、记录摘要/SBOM），并在真实 KVM 上验证了 guest↔host vsock 的 negotiate/upload/build 数据往返。
+
+仓库仍不能编译运行任意用户提交：缺对象存储正文，且 `algorithm-c` 运行时仅为基础镜像、尚未供入 gcc 工具链（无生产语言矩阵）。不具备 HTTP API 或可发布判题系统。
 
 在许可证决策被接受并添加正式 `LICENSE` 前，本仓库内容不得被视为已获得开源分发授权。参见[许可证治理](docs/governance/licensing.md)。
 

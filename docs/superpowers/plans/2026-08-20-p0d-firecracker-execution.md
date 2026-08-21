@@ -80,9 +80,9 @@ docs/architecture/, docs/security/, docs/operations/, docs/validation/  # synchr
 
 ### Task 6: 供应不可变运行时镜像与 SBOM
 
-- [ ] 编写 `infra/runtime-images/algorithm-c/` 供应脚本：下载/构建 kernel、rootfs、guest agent、toolchain，记录来源、内容摘要与 SBOM；摘要/架构不匹配拒绝启动。
-- [ ] 在本机 KVM 上真实引导镜像并记录验证证据。
-- [ ] 若进程内某语言工具链无法在本机构建，保持单固定 Runtime 并明确 `Unverified`，不声明生产语言矩阵。
+- [x] 编写 `infra/runtime-images/algorithm-c/` 供应脚本：下载/构建 kernel、rootfs、guest agent、toolchain，记录来源、内容摘要与 SBOM；摘要/架构不匹配拒绝启动。
+- [x] 在本机 KVM 上真实引导镜像并记录验证证据。
+- [x] 若进程内某语言工具链无法在本机构建，保持单固定 Runtime 并明确 `Unverified`，不声明生产语言矩阵。
 
 ### Task 7: 组装 judge node 真实 Firecracker executor
 
