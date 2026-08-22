@@ -276,18 +276,19 @@ impl FirecrackerVm {
         .await
     }
 
-    /// Opens the host→guest vsock channel after the guest agent is listening.
+    /// Opens the host→guest vsock channel within a bounded guest readiness wait.
     ///
     /// # Errors
     ///
-    /// Returns [`FirecrackerError`] when not yet started or the connection fails.
+    /// Returns [`FirecrackerError`] when not yet started or the guest does not
+    /// become ready before the bounded deadline.
     pub fn open_guest_channel(&self) -> Result<GuestChannel, FirecrackerError> {
         if !self.can_communicate() {
             return Err(FirecrackerError::Io {
                 message: "guest channel requested before start".to_owned(),
             });
         }
-        GuestChannel::connect(
+        GuestChannel::connect_until_ready(
             self.config.vsock_uds_path(),
             self.config.vsock().port(),
             crate::vsock::DEFAULT_READ_TIMEOUT,
