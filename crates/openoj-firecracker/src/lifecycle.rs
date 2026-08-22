@@ -39,7 +39,12 @@ impl VmPhase {
     pub const fn needs_teardown(self) -> bool {
         matches!(
             self,
-            Self::Launching | Self::Configuring | Self::Started | Self::Running | Self::Terminating
+            Self::Launching
+                | Self::Configuring
+                | Self::Started
+                | Self::Running
+                | Self::Terminating
+                | Self::Failed
         )
     }
 
@@ -199,7 +204,11 @@ impl Lifecycle {
                 self.phase = VmPhase::Terminated;
                 Ok(())
             }
-            VmPhase::Launching | VmPhase::Configuring | VmPhase::Started | VmPhase::Running => {
+            VmPhase::Launching
+            | VmPhase::Configuring
+            | VmPhase::Started
+            | VmPhase::Running
+            | VmPhase::Failed => {
                 self.teardowns += 1;
                 self.phase = VmPhase::Terminating;
                 Ok(())
@@ -210,7 +219,6 @@ impl Lifecycle {
                 Ok(())
             }
             VmPhase::Terminated => Err(VmPhase::Terminated),
-            VmPhase::Failed => Err(VmPhase::Failed),
         }
     }
 
@@ -290,13 +298,18 @@ mod tests {
     }
 
     #[test]
-    fn failed_is_terminal_and_not_reclaimable_twice() {
+    fn failed_phase_remains_reclaimable_until_terminated() -> Result<(), VmPhase> {
         let mut lifecycle = Lifecycle::new();
         lifecycle.fail_with(TeardownReason::ControlApi);
         assert_eq!(lifecycle.phase(), VmPhase::Failed);
         assert!(lifecycle.phase().is_terminal());
-        assert!(!lifecycle.phase().needs_teardown());
+        assert!(lifecycle.phase().needs_teardown());
         assert!(!lifecycle.phase().can_communicate());
+        lifecycle.teardown()?;
+        assert_eq!(lifecycle.phase(), VmPhase::Terminating);
+        lifecycle.reclaimed();
+        assert_eq!(lifecycle.phase(), VmPhase::Terminated);
+        Ok(())
     }
 
     #[test]

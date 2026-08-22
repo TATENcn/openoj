@@ -369,4 +369,31 @@ mod tests {
         assert_eq!(vm.phase(), VmPhase::Terminated);
         Ok(())
     }
+
+    #[tokio::test]
+    async fn terminate_reclaims_child_after_control_failure()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let child = Command::new("/usr/bin/sleep").arg("30").spawn()?;
+        let child_id = child.id().ok_or("spawned child has no process id")?;
+        let mut vm = FirecrackerVm::new(
+            fixture_config()?,
+            "/usr/bin/firecracker",
+            "/tmp/fc-failed.sock",
+        );
+        vm.child = Some(child);
+        vm.lifecycle.fail_with(TeardownReason::ControlApi);
+
+        let result = vm.terminate().await;
+        if result.is_err()
+            && let Some(mut child) = vm.child.take()
+        {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+
+        assert!(result.is_ok(), "failed VM must remain reclaimable");
+        assert_eq!(vm.phase(), VmPhase::Terminated);
+        assert!(!Path::new(&format!("/proc/{child_id}")).exists());
+        Ok(())
+    }
 }
