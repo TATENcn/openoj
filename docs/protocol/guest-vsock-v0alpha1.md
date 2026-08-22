@@ -47,6 +47,9 @@ references:
 
 - guest 输出一律由宿主重新按不可信输入处理；最终 Verdict/Score 由宿主侧
   evaluator 依据证据形成，guest 自报成功不构成终态（`ACC-P0-010`）。
+- `upload_input.digest` 是 payload 的 64 字符小写十六进制 SHA-256（不含
+  `sha256:` 前缀）。格式错误或摘要不匹配时 guest 返回 `accepted: false`，且不得落盘。
+  `stage_output.output_digest` 使用同一编码，覆盖被计入 `output_bytes` 的 stdout+stderr。
 - 命令使用**已验证的 argv 数组**（执行器在宿主侧构造并绑定），不提供通用
   shell、宿主路径访问或任意网络（`ACC-P0-005`）。
 - 敏感内容（token、宿主路径、canonical payload）不进入日志或指标标签。
