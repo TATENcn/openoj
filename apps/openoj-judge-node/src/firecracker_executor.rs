@@ -3,9 +3,10 @@
 //! [`FirecrackerExecutor`] drives a [`openoj_firecracker::FirecrackerVm`] and its
 //! guest channel through the canonical stage plan, mapping guest
 //! [`openoj_guest_protocol::Message::StageOutput`] events into domain
-//! [`openoj_application::StageExecution`]. It fails closed: the `production`
-//! profile refuses to run without a configured jailer, and a development mock is
-//! never selected in a production configuration.
+//! [`openoj_application::StageExecution`]. It fails closed: the current
+//! Firecracker path is development-only until every mandatory production
+//! isolation layer is implemented, and a development mock is never selected in
+//! a production configuration.
 //!
 //! The executor talks to the guest through the [`GuestSession`] trait so the
 //! stage orchestration can be unit-tested with a fake session, while a real
@@ -125,20 +126,21 @@ pub struct FirecrackerExecutorConfig {
     pub api_socket: PathBuf,
     /// Validated microVM configuration.
     pub vm_config: FirecrackerConfig,
-    /// Whether the production profile is requested (requires a jailer).
+    /// Whether the production profile is requested.
     pub production: bool,
 }
 
 impl FirecrackerExecutorConfig {
-    /// Validates fail-closed invariants: the production profile requires a jailer.
+    /// Validates fail-closed invariants for the incomplete production profile.
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationError`] when the production profile has no jailer.
+    /// Returns [`ApplicationError`] whenever production is requested because
+    /// uid/gid, cgroup, namespace, seccomp, and watchdog wiring is incomplete.
     pub fn validate(&self) -> Result<(), ApplicationError> {
-        if self.production && self.vm_config.jailer_path().is_none() {
+        if self.production {
             return Err(ApplicationError::InvalidExecutorOutput {
-                reason: "production requires jailer isolation",
+                reason: "production firecracker isolation profile is incomplete",
             });
         }
         Ok(())
@@ -326,7 +328,7 @@ impl StageExecutor for FirecrackerExecutor {
     }
 
     fn production_eligible(&self) -> bool {
-        self.config.production
+        false
     }
 
     fn node_id(&self) -> Option<NodeId> {
@@ -460,6 +462,12 @@ mod tests {
     }
 
     fn vm_config() -> Result<openoj_firecracker::FirecrackerConfig, Box<dyn std::error::Error>> {
+        vm_config_with_jailer(None)
+    }
+
+    fn vm_config_with_jailer(
+        jailer_path: Option<PathBuf>,
+    ) -> Result<openoj_firecracker::FirecrackerConfig, Box<dyn std::error::Error>> {
         Ok(openoj_firecracker::FirecrackerConfig::from_parts(
             openoj_firecracker::FirecrackerConfigParts {
                 kernel_path: "/tmp/k".into(),
@@ -471,7 +479,7 @@ mod tests {
                 limits: openoj_firecracker::ResourceLimits::default(),
                 vsock: openoj_firecracker::VsockConfig::new(3, 8266)?,
                 vsock_uds_path: "/tmp/v.sock".into(),
-                jailer_path: None,
+                jailer_path,
             },
         )?)
     }
@@ -572,6 +580,22 @@ mod tests {
             production: true,
         }
         .validate();
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn production_with_jailer_remains_rejected_until_isolation_profile_is_complete()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let result = FirecrackerExecutorConfig {
+            node_id: NodeId::parse("judge_fc_01")?,
+            firecracker_path: "/usr/bin/firecracker".into(),
+            api_socket: "/tmp/fc.sock".into(),
+            vm_config: vm_config_with_jailer(Some("/usr/bin/jailer".into()))?,
+            production: true,
+        }
+        .validate();
+
         assert!(result.is_err());
         Ok(())
     }
