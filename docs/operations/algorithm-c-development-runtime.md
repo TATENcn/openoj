@@ -1,7 +1,7 @@
 ---
-status: Proposed
+status: Implemented
 owners: OpenOJ operations and security maintainers
-last_reviewed: 2026-08-22
+last_reviewed: 2026-08-23
 applies_to: development-only algorithm-c runtime image and KVM smoke validation
 references:
   - deployment-profiles.md
