@@ -1,0 +1,143 @@
+{
+  "runtime": "algorithm-c",
+  "version": "v0alpha1",
+  "architecture": "x86_64",
+  "kernel": {
+    "filename": "hello-vmlinux.bin",
+    "url": "https://s3.amazonaws.com/spec.ccfc.min/img/hello/kernel/hello-vmlinux.bin",
+    "sha256": "882fa465c43ab7d92e31bd4167da3ad6a82cb9230f9b0016176df597c6014cef",
+    "license": "GPL-2.0-only; binary provenance pending-review"
+  },
+  "alpine": {
+    "release": "3.20.0",
+    "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64",
+    "minirootfs": {
+      "filename": "alpine-minirootfs-3.20.0-x86_64.tar.gz",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.0-x86_64.tar.gz",
+      "sha256": "602efda518516787c716320bd46a3f50e83a74bb749e55483c2f4a9c9f8b9a38",
+      "license": "various; package-level review pending"
+    },
+    "packages": [
+      {
+        "name": "binutils",
+        "version": "2.42-r1",
+        "filename": "binutils-2.42-r1.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/binutils-2.42-r1.apk",
+        "sha256": "95ff0ecfed3ca185bf7e04f15abc36b6c23d5645b0b8d1f7ab56e4bee425ec64",
+        "license": "GPL-2.0-or-later AND LGPL-2.1-or-later AND BSD-3-Clause"
+      },
+      {
+        "name": "gcc",
+        "version": "13.2.1_git20240309-r1",
+        "filename": "gcc-13.2.1_git20240309-r1.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/gcc-13.2.1_git20240309-r1.apk",
+        "sha256": "f3c6095905cbe31d77ac7e3ba3397058b952751d0dd6b0511e8baa464ef0fa99",
+        "license": "GPL-2.0-or-later AND LGPL-2.1-or-later"
+      },
+      {
+        "name": "gmp",
+        "version": "6.3.0-r1",
+        "filename": "gmp-6.3.0-r1.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/gmp-6.3.0-r1.apk",
+        "sha256": "dfc94acb8d7e33d3505b583b010932a3a49ea0388c2ba145ff6edafa7bf1104f",
+        "license": "LGPL-3.0-or-later OR GPL-2.0-or-later"
+      },
+      {
+        "name": "isl25",
+        "version": "0.25-r2",
+        "filename": "isl25-0.25-r2.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/isl25-0.25-r2.apk",
+        "sha256": "2f3c87ff2ef58295c25b1877a03a8633306eb2e23580706bb73f3b36e4d08a42",
+        "license": "MIT"
+      },
+      {
+        "name": "jansson",
+        "version": "2.14-r4",
+        "filename": "jansson-2.14-r4.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/jansson-2.14-r4.apk",
+        "sha256": "475260d29922e9de90cfc31a2dff36b43d89d54adf6328d8d445bedf362a71e7",
+        "license": "MIT"
+      },
+      {
+        "name": "libatomic",
+        "version": "13.2.1_git20240309-r1",
+        "filename": "libatomic-13.2.1_git20240309-r1.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/libatomic-13.2.1_git20240309-r1.apk",
+        "sha256": "dd919973497ab512102e55eca1cf45176a4ec45b986eff7d5ddabcabdeecab9b",
+        "license": "GPL-2.0-or-later AND LGPL-2.1-or-later"
+      },
+      {
+        "name": "libgcc",
+        "version": "13.2.1_git20240309-r1",
+        "filename": "libgcc-13.2.1_git20240309-r1.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/libgcc-13.2.1_git20240309-r1.apk",
+        "sha256": "f348d99e10b5267566afe6f80861661b08cb5aa43a6d4d1c8f1792b5001d0995",
+        "license": "GPL-2.0-or-later AND LGPL-2.1-or-later"
+      },
+      {
+        "name": "libgomp",
+        "version": "13.2.1_git20240309-r1",
+        "filename": "libgomp-13.2.1_git20240309-r1.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/libgomp-13.2.1_git20240309-r1.apk",
+        "sha256": "16376925965cc10604559b4ecfca3e3afd65c17355e9cee32c43570d08322a35",
+        "license": "GPL-2.0-or-later AND LGPL-2.1-or-later"
+      },
+      {
+        "name": "libstdc++",
+        "version": "13.2.1_git20240309-r1",
+        "filename": "libstdc++-13.2.1_git20240309-r1.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/libstdc++-13.2.1_git20240309-r1.apk",
+        "sha256": "af0fe894ef5051116e321bf4753a10fffa85abc2b71f30b2e949467775421ace",
+        "license": "GPL-2.0-or-later AND LGPL-2.1-or-later"
+      },
+      {
+        "name": "mpc1",
+        "version": "1.3.1-r1",
+        "filename": "mpc1-1.3.1-r1.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/mpc1-1.3.1-r1.apk",
+        "sha256": "f27ed38b9d58dd4aef9fe239c8cd5943701a1f839a2baee13d1bebd36a727503",
+        "license": "LGPL-3.0-or-later"
+      },
+      {
+        "name": "mpfr4",
+        "version": "4.2.1-r0",
+        "filename": "mpfr4-4.2.1-r0.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/mpfr4-4.2.1-r0.apk",
+        "sha256": "8ffac292b300ffcd29ae88ea9919d49130d04394be8f4919da95f2ec861b9a81",
+        "license": "LGPL-3.0-or-later"
+      },
+      {
+        "name": "musl",
+        "version": "1.2.5-r3",
+        "filename": "musl-1.2.5-r3.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/musl-1.2.5-r3.apk",
+        "sha256": "70705bdeb1a8d54ee1ec7ce3b06f176206f4f3b105d86cf5576d74b8277adfa0",
+        "license": "MIT"
+      },
+      {
+        "name": "musl-dev",
+        "version": "1.2.5-r3",
+        "filename": "musl-dev-1.2.5-r3.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/musl-dev-1.2.5-r3.apk",
+        "sha256": "36abcf8a199826080b9b2a45f86782afae4ae5c8b8331909e5113911e2bdcad1",
+        "license": "MIT"
+      },
+      {
+        "name": "zlib",
+        "version": "1.3.2-r0",
+        "filename": "zlib-1.3.2-r0.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/zlib-1.3.2-r0.apk",
+        "sha256": "39c506b74e5bf4b693179d0aefd10b161278063261ffdaa8fe704d075c64429b",
+        "license": "Zlib"
+      },
+      {
+        "name": "zstd-libs",
+        "version": "1.5.6-r0",
+        "filename": "zstd-libs-1.5.6-r0.apk",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/zstd-libs-1.5.6-r0.apk",
+        "sha256": "69793fd27f1b83c4ab1b31e02bc3f8b5a6d4f9c3508aece8a259f475e196c475",
+        "license": "BSD-3-Clause OR GPL-2.0-or-later"
+      }
+    ]
+  }
+}
