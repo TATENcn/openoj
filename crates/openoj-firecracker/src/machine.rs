@@ -314,6 +314,7 @@ impl FirecrackerVm {
             let _ = child.wait().await;
         }
         let _ = tokio::fs::remove_file(&self.api_socket).await;
+        let _ = tokio::fs::remove_file(self.config.vsock_uds_path()).await;
         self.lifecycle.reclaimed();
         Ok(())
     }
@@ -327,6 +328,7 @@ impl Drop for FirecrackerVm {
                 let _ = child.start_kill();
             }
             let _ = std::fs::remove_file(&self.api_socket);
+            let _ = std::fs::remove_file(self.config.vsock_uds_path());
         }
     }
 }
@@ -337,6 +339,12 @@ mod tests {
     use crate::config::{FirecrackerConfigParts, MachineConfig, ResourceLimits, VsockConfig};
 
     fn fixture_config() -> Result<FirecrackerConfig, FirecrackerError> {
+        fixture_config_with_vsock("/tmp/vsock.sock")
+    }
+
+    fn fixture_config_with_vsock(
+        vsock_uds_path: impl Into<PathBuf>,
+    ) -> Result<FirecrackerConfig, FirecrackerError> {
         FirecrackerConfig::from_parts(FirecrackerConfigParts {
             kernel_path: "/tmp/kernel.bin".into(),
             kernel_digest: "sha256:k".into(),
@@ -346,7 +354,7 @@ mod tests {
             machine: MachineConfig::new(1, 128)?,
             limits: ResourceLimits::default(),
             vsock: VsockConfig::new(3, 8266)?,
-            vsock_uds_path: "/tmp/vsock.sock".into(),
+            vsock_uds_path: vsock_uds_path.into(),
             jailer_path: None,
         })
     }
@@ -368,6 +376,27 @@ mod tests {
         vm.terminate().await?;
         vm.terminate().await?;
         assert_eq!(vm.phase(), VmPhase::Terminated);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn terminate_removes_owned_api_and_vsock_paths() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let suffix = std::process::id();
+        let api_socket = PathBuf::from(format!("/tmp/openoj-fc-api-{suffix}.sock"));
+        let vsock_socket = PathBuf::from(format!("/tmp/openoj-fc-vsock-{suffix}.sock"));
+        std::fs::write(&api_socket, [])?;
+        std::fs::write(&vsock_socket, [])?;
+        let mut vm = FirecrackerVm::new(
+            fixture_config_with_vsock(&vsock_socket)?,
+            "/usr/bin/firecracker",
+            &api_socket,
+        );
+
+        vm.terminate().await?;
+
+        assert!(!api_socket.exists());
+        assert!(!vsock_socket.exists());
         Ok(())
     }
 
