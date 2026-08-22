@@ -18,7 +18,7 @@ references:
 | RISK-PROTOCOL-001 | 过早冻结通用协议，无法容纳第二种评测 Profile | P0 使用 alpha；两个 Profile 与 conformance 通过后再稳定 | Open |
 | RISK-SCOPE-001 | 多模态、AI、商业化设想使 P0 无法交付 | `scope.md` 非目标和分阶段验收 | Mitigated |
 | RISK-PLUGIN-001 | 高自由度插件绕过安全或拖垮宿主 | capability Broker、Wasm/服务/microVM 分级、默认拒绝 | Open |
-| RISK-EXEC-001 | vsock/guest-agent 路径把 guest 输出误信为合法终态或发生跨任务泄漏 | 宿主侧 check、有界消息、只执行宿主校验的 argv、回收幂等 | Open |
+| RISK-EXEC-001 | vsock/guest-agent 路径把 guest 输出误信为合法终态、发生跨任务泄漏或错误宣称生产可用 | 宿主侧 check、有界消息、只执行宿主校验的 argv、Attempt 级幂等回收；强制隔离层完整前拒绝 production profile | Open |
 | RISK-SUPPLY-001 | kernel、rootfs、编译器和依赖被投毒或许可证不兼容 | 摘要、来源、SBOM、签名、许可证门禁 | Open |
 | RISK-DATA-001 | 源码、隐藏测试和日志泄漏 | 分类、最小访问、脱敏、保留期和审计 | Open |
 | RISK-OPS-001 | KVM/网络/磁盘操作增加 judge node 运维复杂度 | 明确部署 Profile、节点排空、watchdog 和 runbook | Open |
