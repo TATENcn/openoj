@@ -11,6 +11,7 @@
 //! stage orchestration can be unit-tested with a fake session, while a real
 //! [`FirecrackerGuestSession`] drives the actual microVM over vsock.
 
+use std::future::Future;
 use std::path::PathBuf;
 
 use openoj_application::{ApplicationError, StageContext, StageExecution, StageExecutor};
@@ -74,6 +75,45 @@ fn map_firecracker(_error: FirecrackerError) -> ApplicationError {
     }
 }
 
+fn block_on_vmm<F>(future: F) -> Result<F::Output, ApplicationError>
+where
+    F: Future,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => match handle.runtime_flavor() {
+            tokio::runtime::RuntimeFlavor::MultiThread => {
+                Ok(tokio::task::block_in_place(|| handle.block_on(future)))
+            }
+            _ => Err(ApplicationError::InvalidExecutorOutput {
+                reason: "firecracker executor requires a multi-thread runtime",
+            }),
+        },
+        Err(_) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| ApplicationError::InvalidExecutorOutput {
+                reason: "firecracker runtime unavailable",
+            })
+            .map(|runtime| runtime.block_on(future)),
+    }
+}
+
+trait VmLease: Send {
+    fn terminate(&mut self) -> Result<(), ApplicationError>;
+}
+
+struct FirecrackerVmLease {
+    vm: FirecrackerVm,
+}
+
+impl VmLease for FirecrackerVmLease {
+    fn terminate(&mut self) -> Result<(), ApplicationError> {
+        block_on_vmm(self.vm.terminate())?.map_err(|_| ApplicationError::InvalidExecutorOutput {
+            reason: "microvm teardown failed",
+        })
+    }
+}
+
 /// Configuration required to assemble a Firecracker executor.
 #[derive(Clone, Debug)]
 pub struct FirecrackerExecutorConfig {
@@ -108,32 +148,25 @@ impl FirecrackerExecutorConfig {
 /// A real Firecracker executor that runs the canonical algorithm-batch plan.
 pub struct FirecrackerExecutor {
     config: FirecrackerExecutorConfig,
-    runtime: tokio::runtime::Runtime,
     session: Option<Box<dyn GuestSession>>,
+    vm: Option<Box<dyn VmLease>>,
     negotiated: bool,
     last_run_exit: Option<i32>,
     terminated: bool,
 }
 
 impl FirecrackerExecutor {
-    /// Assembles an executor, building a single-threaded async runtime for the VMM.
+    /// Assembles an executor after validating its fail-closed configuration.
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationError`] when the config is invalid or the runtime
-    /// cannot be built.
+    /// Returns [`ApplicationError`] when the config is invalid.
     pub fn try_new(config: FirecrackerExecutorConfig) -> Result<Self, ApplicationError> {
         config.validate()?;
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|_| ApplicationError::InvalidExecutorOutput {
-                reason: "firecracker runtime unavailable",
-            })?;
         Ok(Self {
             config,
-            runtime,
             session: None,
+            vm: None,
             negotiated: false,
             last_run_exit: None,
             terminated: false,
@@ -149,18 +182,39 @@ impl FirecrackerExecutor {
             self.config.firecracker_path.clone(),
             self.config.api_socket.clone(),
         );
-        self.runtime
-            .block_on(vm.bootstrap(self.config.production))
-            .map_err(|_| ApplicationError::InvalidExecutorOutput {
+        if !matches!(
+            block_on_vmm(vm.bootstrap(self.config.production)),
+            Ok(Ok(()))
+        ) {
+            let _ = block_on_vmm(vm.terminate());
+            return Err(ApplicationError::InvalidExecutorOutput {
                 reason: "microvm bootstrap failed",
-            })?;
-        let channel =
-            vm.open_guest_channel()
-                .map_err(|_| ApplicationError::InvalidExecutorOutput {
-                    reason: "guest channel unavailable",
-                })?;
-        self.session = Some(Box::new(FirecrackerGuestSession::new(channel)));
+            });
+        }
+        let Ok(channel) = vm.open_guest_channel() else {
+            let _ = block_on_vmm(vm.terminate());
+            return Err(ApplicationError::InvalidExecutorOutput {
+                reason: "guest channel unavailable",
+            });
+        };
+        self.activate_session(
+            Box::new(FirecrackerGuestSession::new(channel)),
+            Box::new(FirecrackerVmLease { vm }),
+        );
         Ok(())
+    }
+
+    fn activate_session(&mut self, session: Box<dyn GuestSession>, vm: Box<dyn VmLease>) {
+        self.vm = Some(vm);
+        self.session = Some(session);
+    }
+
+    fn begin_attempt(&mut self) {
+        if self.terminated {
+            self.negotiated = false;
+            self.last_run_exit = None;
+            self.terminated = false;
+        }
     }
 
     fn ensure_negotiated(&mut self) -> Result<(), ApplicationError> {
@@ -241,6 +295,9 @@ impl FirecrackerExecutor {
     /// Releases the guest session; safe to call more than once.
     pub fn teardown(&mut self) {
         self.session.take();
+        if let Some(mut vm) = self.vm.take() {
+            let _ = vm.terminate();
+        }
         self.terminated = true;
     }
 }
@@ -256,7 +313,10 @@ impl JudgeExecutor for FirecrackerExecutor {
         &mut self,
         request: &EvaluationRequest,
     ) -> Result<EvaluationResult, ApplicationError> {
-        openoj_application::evaluate(request, self)
+        self.begin_attempt();
+        let result = openoj_application::evaluate(request, self);
+        self.teardown();
+        result
     }
 }
 
@@ -335,6 +395,8 @@ mod tests {
     use openoj_guest_protocol::Stage as SessionStage;
     use openoj_judge_core::JudgeExecutor;
     use openoj_protocol::decode_evaluation_request;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     const DIGEST: &str = "abababababababababababababababababababababababababababababababab";
     const VALID_REQUEST: &[u8] =
@@ -386,6 +448,17 @@ mod tests {
         }
     }
 
+    struct RecordingVmLease {
+        teardowns: Arc<AtomicUsize>,
+    }
+
+    impl VmLease for RecordingVmLease {
+        fn terminate(&mut self) -> Result<(), ApplicationError> {
+            self.teardowns.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
     fn vm_config() -> Result<openoj_firecracker::FirecrackerConfig, Box<dyn std::error::Error>> {
         Ok(openoj_firecracker::FirecrackerConfig::from_parts(
             openoj_firecracker::FirecrackerConfigParts {
@@ -426,6 +499,66 @@ mod tests {
         assert_eq!(result.verdict(), Verdict::Accepted);
         assert_eq!(result.provenance().executor_kind().as_str(), "firecracker");
         executor.teardown();
+        Ok(())
+    }
+
+    #[test]
+    fn each_attempt_reclaims_vm_and_keeps_executor_reusable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = decode_evaluation_request(VALID_REQUEST)?;
+        let teardowns = Arc::new(AtomicUsize::new(0));
+        let mut executor = FirecrackerExecutor::try_new(FirecrackerExecutorConfig {
+            node_id: NodeId::parse("judge_fc_01")?,
+            firecracker_path: "/usr/bin/firecracker".into(),
+            api_socket: "/tmp/fc.sock".into(),
+            vm_config: vm_config()?,
+            production: false,
+        })?;
+        executor.activate_session(
+            Box::new(ScriptedSession::success()),
+            Box::new(RecordingVmLease {
+                teardowns: Arc::clone(&teardowns),
+            }),
+        );
+
+        let result = JudgeExecutor::execute(&mut executor, &request)?;
+        assert_eq!(result.verdict(), Verdict::Accepted);
+        assert_eq!(teardowns.load(Ordering::SeqCst), 1);
+
+        executor.activate_session(
+            Box::new(ScriptedSession::success()),
+            Box::new(RecordingVmLease {
+                teardowns: Arc::clone(&teardowns),
+            }),
+        );
+        let next_result = JudgeExecutor::execute(&mut executor, &request)?;
+        assert_eq!(next_result.verdict(), Verdict::Accepted);
+        assert_eq!(teardowns.load(Ordering::SeqCst), 2);
+
+        executor.teardown();
+        executor.teardown();
+        assert_eq!(teardowns.load(Ordering::SeqCst), 2);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn bootstrap_failure_inside_worker_runtime_returns_error_without_panicking()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut executor = FirecrackerExecutor::try_new(FirecrackerExecutorConfig {
+            node_id: NodeId::parse("judge_fc_01")?,
+            firecracker_path: "/definitely/missing/firecracker".into(),
+            api_socket: "/tmp/fc-missing.sock".into(),
+            vm_config: vm_config()?,
+            production: false,
+        })?;
+
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| executor.ensure_session()));
+
+        assert!(
+            matches!(outcome, Ok(Err(_))),
+            "bootstrap failure must return an error without panicking the worker"
+        );
         Ok(())
     }
 
