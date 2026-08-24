@@ -34,3 +34,4 @@ references:
 - `2026-08-22-microvm-lifecycle-safety.md`：microVM 失败态回收、Attempt 级 VMM 所有权与不完整 production profile 拒绝的无 KVM 回归证据。
 - `2026-08-23-algorithm-c-runtime-smoke.md`：`algorithm-c` 镜像供应、guest 上传摘要、严格 KVM smoke 与当前无 KVM 的未验证边界。
 - `2026-08-25-algorithm-c-runtime-kvm.md`：修复 guest 文件系统启动后，在真实 KVM 上验证 C 编译运行、编译失败、运行超时与幂等回收。
+- `2026-08-25-algorithm-c-process-e2e.md`：在真实 KVM 上验证 CLI、PostgreSQL、UDS、judge-node、Firecracker、宿主检查和持久化结果的固定 development Artifact 闭环。
