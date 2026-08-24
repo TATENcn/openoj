@@ -3,8 +3,10 @@
 
 set -eu
 
-/bin/busybox mount -t devtmpfs -o mode=0755,nosuid devtmpfs /dev
 /bin/busybox mount -t proc -o nosuid,nodev,noexec proc /proc
+if ! /bin/busybox grep -qs ' /dev devtmpfs ' /proc/mounts; then
+  /bin/busybox mount -t devtmpfs -o mode=0755,nosuid devtmpfs /dev
+fi
 /bin/busybox mount -t sysfs -o ro,nosuid,nodev,noexec sysfs /sys
 /bin/busybox mount -t tmpfs -o mode=0700,nosuid,nodev,size=67108864 tmpfs /work
 /bin/busybox mkdir -p /work/inputs /work/tmp

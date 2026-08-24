@@ -109,11 +109,13 @@ done < <(jq -er '.alpine.packages[].filename' "$LOCK_FILE")
 
 install -D --mode 0755 "$AGENT_BINARY" "$STAGING_DIR/usr/local/bin/openoj-guest-agent"
 install -D --mode 0755 "$RUNTIME_DIR/rootfs/sbin/openoj-init" "$STAGING_DIR/sbin/openoj-init"
+install -d --mode 0700 "$STAGING_DIR/work"
 
 test -x "$STAGING_DIR/bin/busybox"
 test -x "$STAGING_DIR/usr/bin/cc"
 test -x "$STAGING_DIR/usr/local/bin/openoj-guest-agent"
 test -x "$STAGING_DIR/sbin/openoj-init"
+test -d "$STAGING_DIR/work"
 
 find "$STAGING_DIR" -exec touch --no-dereference --date="@$SOURCE_DATE_EPOCH" {} +
 truncate --size "$ROOTFS_BYTES" "$ROOTFS_IMAGE"

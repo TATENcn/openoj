@@ -28,6 +28,8 @@ jq -e '
 grep -Fq 'OPENOJ_RUNTIME_OFFLINE' "$RUNTIME_DIR/provision.sh"
 grep -Fq 'x86_64-unknown-linux-musl' "$RUNTIME_DIR/provision.sh"
 grep -Fq 'guest_network: "absent"' "$RUNTIME_DIR/provision.sh"
+grep -Fq 'install -d --mode 0700 "$STAGING_DIR/work"' "$RUNTIME_DIR/provision.sh"
+grep -Fq "grep -qs ' /dev devtmpfs ' /proc/mounts" "$RUNTIME_DIR/rootfs/sbin/openoj-init"
 grep -Fq 'size=67108864' "$RUNTIME_DIR/rootfs/sbin/openoj-init"
 
 echo "algorithm-c runtime structure checks passed"
