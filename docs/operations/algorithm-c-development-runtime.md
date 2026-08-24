@@ -51,6 +51,12 @@ sbom.spdx.json
 agent、C 工具链的来源与 SHA-256、rootfs 只读属性、guest 网络策略和验证状态。manifest 与
 SBOM 自身也必须进入 `manifest.sha256`。摘要或架构不匹配时测试和执行配置必须拒绝。
 
+rootfs 构建必须把 staging tree 转换为固定路径顺序、时间、属主且不携带 `atime/ctime` 的
+规范化 tar，再由 `mke2fs` 导入；文件系统 UUID、目录 hash seed 与 source date epoch 必须显式
+固定。`verify-reproducible.sh` 必须连续执行两次完整供应流程并逐文件比较输出目录。同一主机与
+工具版本下出现任何字节差异都必须失败；跨发行版、`e2fsprogs` 或归档工具版本的可复现性仍需
+单独取证，不能由同机验证推断。
+
 ## Guest 文件系统与启动
 
 - root block device 以只读方式挂载；不得把宿主任意路径映射进 guest。
@@ -76,6 +82,7 @@ agent readiness 必须让测试失败。
 3. 编译错误和运行超时返回确定阶段结果，不伪造后续成功；
 4. 重复 teardown 幂等，VMM 与 socket 不残留；
 5. guest 未配置网络设备，未接收平台秘密。
+6. 同一锁定输入在相同构建环境连续供应两次，所有输出逐字节一致。
 
 验证记录必须包含主机、内核、KVM、Firecracker、构建类型、所有镜像摘要、输入 fixture、
 完整命令、结果和未验证项。没有真实 KVM 证据时文档状态保持 `Proposed` 或
