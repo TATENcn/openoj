@@ -1,0 +1,61 @@
+OpenOJ algorithm-c real-microVM process failure validation
+Date: 2026-08-25 Asia/Shanghai
+Implementation commit: 752880c6f701256a86449a2e57be9592ba969703
+
+Environment
+Linux 7.1.8-zen1-3-zen x86_64
+AMD Ryzen 9 9950X3D, 8 visible CPUs, 15 GiB memory, VMware AMD-V
+/dev/kvm crw-rw-rw- root:kvm; KVM API version 12
+Firecracker v1.16.1
+Rust/Cargo 1.97.1
+PostgreSQL 18-alpine image:
+postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+
+Fixtures
+accepted source: c2329bffd207edd619d4ca7c7cdd872b76374e1a50421f705020671ca1f85556
+accepted output: 084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0
+compile-error source: 45c508a05870369dd65fb951ee804127925b454fa0078ac6e37f84f5a1e3fa06
+timeout source: 84950edbf9514ebef845181f9f296bf2a71be3032f0d1d27b28b93fe1fd57f54
+
+Runtime artifacts
+kernel: 882fa465c43ab7d92e31bd4167da3ad6a82cb9230f9b0016176df597c6014cef
+rootfs: e9b2ca2f060161b01ccaafc20fd56e246def6b41011b4183d5c72f40b50f6f9c
+guest agent: e775d7d0fe71b8980a58ad02b2a9b8ac1195d6b32fc745db659750e46373cae2
+manifest: c5ab7fb51144f39837e47799c2d7f1032f485b50a99337cb8fb84b41e3a12ea3
+SPDX SBOM: aee7b475b81add5b58f497accdad5d4ef10a5ba8ad06e89007e2427e904ecddb
+manifest checksum file: 7f52e4517fd503418599fe538a8f9b0ec839eaad650450c60728458b62d612ed
+
+Focused strict process test
+$ OPENOJ_REQUIRE_KVM=1 OPENOJ_TEST_DATABASE_URL=<isolated-postgresql-18> \
+    cargo test -p openoj-control-plane --test process_e2e real_microvm_ \
+    --locked -- --nocapture --test-threads=1
+postgres_uds_and_judge_node_reach_a_persisted_real_microvm_result: PASS
+real_microvm_compile_error_is_persisted_and_reclaimed: PASS
+real_microvm_timeout_is_persisted_and_reclaimed: PASS
+3 passed; 0 failed; 25.18 s
+
+Assertions for both failure cases
+- persisted verdict matches CompileError or TimeLimitExceeded
+- executor provenance is Firecracker, production_eligible is false, node ID is judge_node_fc_01
+- the terminal build/run stage is Failed and contains diagnostics plus content-addressed evidence
+- all stages after the terminal rejection are Skipped
+- Firecracker API and vsock paths are reclaimed
+
+Workspace gates
+cargo fmt --all -- --check: PASS
+cargo check --workspace --all-targets --locked: PASS
+cargo clippy --workspace --all-targets --locked -- -D warnings: PASS
+DATABASE_URL=<isolated-postgresql-18> OPENOJ_TEST_DATABASE_URL=<same> OPENOJ_REQUIRE_KVM=1 \
+  cargo test --workspace --all-targets --locked: PASS (151 tests)
+process_e2e: PASS (8 tests, 13.16 s)
+strict algorithm-c KVM runtime smoke: PASS (1 test, 1.87 s)
+PostgreSQL control-spine: PASS (17 tests)
+cargo deny --locked check advisories bans sources: PASS (existing duplicate-version warnings only)
+python3 scripts/check-workspace.py: PASS
+
+Clippy first rejected a 121-line helper under clippy::too_many_lines. Result assertions were
+extracted into a separate helper; Clippy then passed without an allow attribute or weaker lint.
+
+Cleanup
+The task-local PostgreSQL container was removed. No Firecracker process remained.
+The pre-existing shared offline runtime cache was retained.
