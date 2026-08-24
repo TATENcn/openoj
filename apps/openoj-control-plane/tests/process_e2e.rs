@@ -175,6 +175,26 @@ fn run_real_microvm_case(case: RealMicrovmCase) -> Result<(), Box<dyn Error>> {
 
     wait_for_any_terminal_status(&root, &database_url, &evaluation_id)?;
     let result = persisted_result(&database_url, &evaluation_id)?;
+    assert_real_microvm_result(&result, case)?;
+
+    judge_node.stop();
+    control_plane.stop();
+    assert!(
+        !api_socket.exists(),
+        "Firecracker API socket was not reclaimed"
+    );
+    assert!(
+        !vsock_socket.exists(),
+        "Firecracker vsock path was not reclaimed"
+    );
+    fs::remove_file(socket_path)?;
+    Ok(())
+}
+
+fn assert_real_microvm_result(
+    result: &openoj_domain::EvaluationResult,
+    case: RealMicrovmCase,
+) -> Result<(), Box<dyn Error>> {
     assert_eq!(
         result.verdict(),
         case.expected_verdict,
@@ -232,18 +252,6 @@ fn run_real_microvm_case(case: RealMicrovmCase) -> Result<(), Box<dyn Error>> {
             Some(ALGORITHM_C_OUTPUT_CONTENT_DIGEST)
         );
     }
-
-    judge_node.stop();
-    control_plane.stop();
-    assert!(
-        !api_socket.exists(),
-        "Firecracker API socket was not reclaimed"
-    );
-    assert!(
-        !vsock_socket.exists(),
-        "Firecracker vsock path was not reclaimed"
-    );
-    fs::remove_file(socket_path)?;
     Ok(())
 }
 
