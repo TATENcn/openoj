@@ -1,0 +1,62 @@
+OpenOJ algorithm-c rootfs reproducibility validation
+Date: 2026-08-25 Asia/Shanghai
+Implementation commit: 17f178a6c7413a65c937430d0f638a9583d03936
+
+Environment
+Linux 7.1.8-zen1-3-zen x86_64
+AMD Ryzen 9 9950X3D, 8 visible CPUs, 15 GiB memory, VMware AMD-V
+/dev/kvm crw-rw-rw- root:kvm; KVM API version 12
+Firecracker v1.16.1
+Rust/Cargo 1.97.1
+mke2fs 1.47.4 / libext2fs 1.47.4
+GNU tar 1.35
+PostgreSQL 18-alpine image:
+postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+
+RED: two builds from the same locked inputs before this change
+rootfs #1: 15fed4ac44dd5f0de02a6c9f0d9c85e3207fd897a238ea9f08781f2a9eab904c
+rootfs #2: 7a7f28d788d587cf8bb58b3762c714d31472e4057bbb93e3dc0bdcfe5e3d32cd
+Directory Hash Seed #1: 56940a57-53fe-4c86-a5c9-68662209585c
+Directory Hash Seed #2: fd9c9150-5929-4749-93f7-d83a255651d6
+
+RED after fixing only the ext4 directory hash seed
+rootfs #1: 098b92d52ed0ca662b32e1cf84d41badeecc6a8d7db19109d5b1d62945fa78c1
+rootfs #2: 86f6cca116746379de912b2178a9e603069512f73f74d4b6ced8929ad5f704db
+Imported inode ctime #1: 2026-08-25 00:47:13 +0800
+Imported inode ctime #2: 2026-08-25 00:47:26 +0800
+
+GREEN: normalized tar import plus fixed ext4 seeds
+$ OPENOJ_RUNTIME_OFFLINE=1 OPENOJ_RUNTIME_CACHE=/tmp/openoj-algorithm-c-cache \
+    bash infra/runtime-images/algorithm-c/verify-reproducible.sh
+26f7a7a0375bde0bab2609eec701403d5f4bae32156995f0f7720ce0138faf80  first/rootfs/rootfs.ext4
+26f7a7a0375bde0bab2609eec701403d5f4bae32156995f0f7720ce0138faf80  second/rootfs/rootfs.ext4
+algorithm-c runtime repeated-build comparison passed
+The recursive comparison covered kernel, rootfs, guest agent, manifest, checksum manifest, and SBOM.
+
+Final artifact digests
+kernel: 882fa465c43ab7d92e31bd4167da3ad6a82cb9230f9b0016176df597c6014cef
+rootfs: 26f7a7a0375bde0bab2609eec701403d5f4bae32156995f0f7720ce0138faf80
+guest agent: e775d7d0fe71b8980a58ad02b2a9b8ac1195d6b32fc745db659750e46373cae2
+C toolchain lock: 5d60f2080509113459fe14dca82594c87016f5a869c26351d9d6b2af55bb51c6
+manifest: d0c5a96d736204b3ae0cbcf057c2003dce42726e0d3271f24fdcf0cccfc0f81e
+SPDX SBOM: aee7b475b81add5b58f497accdad5d4ef10a5ba8ad06e89007e2427e904ecddb
+manifest checksum file: d08957d4c55882586310172db8253a512c25e972e50e3f40f8a461d46238bcbd
+sources.lock.json: 322668c764a4b9fe325c079a3fa10eb552fb34ef57b2dee53b89109a5fcc880c
+Filesystem UUID and Directory Hash Seed: 8d617bd3-5336-4aec-926a-1d5c12d7f009
+source_date_epoch: 1711929600
+
+Validation commands and results
+bash infra/runtime-images/algorithm-c/check.sh: PASS
+sha256sum --check --strict manifest.sha256: PASS (5/5)
+OPENOJ_REQUIRE_KVM=1 cargo test -p openoj-firecracker --test boot --locked -- --nocapture: PASS (1/1, 1.80 s)
+cargo fmt --all -- --check: PASS
+cargo check --workspace --all-targets --locked: PASS
+cargo clippy --workspace --all-targets --locked -- -D warnings: PASS
+DATABASE_URL=<isolated-postgresql-18> OPENOJ_TEST_DATABASE_URL=<same> OPENOJ_REQUIRE_KVM=1 \
+  cargo test --workspace --all-targets --locked: PASS (145 tests)
+cargo deny --locked check advisories bans sources: PASS (existing duplicate-version warnings only)
+python3 scripts/check-workspace.py: PASS
+
+Cleanup
+The task-local PostgreSQL container and four diagnostic directories were removed.
+No Firecracker process remained. The pre-existing shared offline runtime cache was retained.

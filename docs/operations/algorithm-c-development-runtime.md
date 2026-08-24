@@ -14,6 +14,7 @@ references:
   - ../development/testing.md
   - ../governance/licensing.md
   - ../validation/2026-08-25-algorithm-c-runtime-kvm.md
+  - ../validation/2026-08-25-algorithm-c-rootfs-reproducibility.md
 ---
 
 # algorithm-c 开发运行时契约
