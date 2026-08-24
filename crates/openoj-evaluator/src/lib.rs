@@ -114,23 +114,26 @@ fn short_token(digest: &str, maximum: usize) -> String {
     String::from_utf8_lossy(&bytes[..count]).into_owned()
 }
 
-/// Forms the host-side check decision from a run stage's exit status.
+/// Forms the host-side check decision from a run stage's exit status and output digest.
 ///
-/// This is a structural check for the P0 vertical slice: a zero exit code and a
-/// bounded output digest yield `Accepted`; a nonzero exit yields `WrongAnswer`.
-/// Full comparison against hidden test-case outputs requires object-storage test
-/// data, which is a P0 non-goal, so it is documented as `Unverified`.
+/// The guest cannot self-declare success: the host accepts only a zero exit code
+/// whose validated content digest matches the expected test output.
 ///
 /// # Errors
 ///
 /// Returns [`ApplicationError`] when the verdict/score pairing is invalid.
-pub fn host_check_decision(exit_code: i32) -> Result<Decision, ApplicationError> {
-    let verdict = if exit_code == 0 {
+pub fn host_check_decision(
+    exit_code: i32,
+    guest_digest: &str,
+    expected_digest: &ContentDigest,
+) -> Result<Decision, ApplicationError> {
+    let matches = exit_code == 0 && content_digest(guest_digest)? == *expected_digest;
+    let verdict = if matches {
         Verdict::Accepted
     } else {
         Verdict::WrongAnswer
     };
-    let score = if exit_code == 0 {
+    let score = if matches {
         Score::new(1, 1)?
     } else {
         Score::new(0, 1)?
@@ -194,7 +197,7 @@ mod tests {
 
     #[test]
     fn zero_exit_is_accepted() -> Result<(), Box<dyn std::error::Error>> {
-        let decision = host_check_decision(0)?;
+        let decision = host_check_decision(0, DIGEST, &content_digest(DIGEST)?)?;
         assert_eq!(decision.verdict(), Verdict::Accepted);
         assert_eq!(decision.score(), Score::new(1, 1)?);
         Ok(())
@@ -202,7 +205,16 @@ mod tests {
 
     #[test]
     fn nonzero_exit_is_wrong_answer() -> Result<(), Box<dyn std::error::Error>> {
-        let decision = host_check_decision(1)?;
+        let decision = host_check_decision(1, DIGEST, &content_digest(DIGEST)?)?;
+        assert_eq!(decision.verdict(), Verdict::WrongAnswer);
+        assert_eq!(decision.score(), Score::new(0, 1)?);
+        Ok(())
+    }
+
+    #[test]
+    fn mismatched_output_is_wrong_answer() -> Result<(), Box<dyn std::error::Error>> {
+        let expected = content_digest(&"c".repeat(64))?;
+        let decision = host_check_decision(0, DIGEST, &expected)?;
         assert_eq!(decision.verdict(), Verdict::WrongAnswer);
         assert_eq!(decision.score(), Score::new(0, 1)?);
         Ok(())

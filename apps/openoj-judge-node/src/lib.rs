@@ -6,7 +6,8 @@ use std::fmt::{self, Display, Formatter};
 use std::path::Path;
 
 pub use firecracker_executor::{
-    FirecrackerExecutor, FirecrackerExecutorConfig, FirecrackerGuestSession, GuestSession,
+    AlgorithmCWorkload, FirecrackerExecutor, FirecrackerExecutorConfig, FirecrackerGuestSession,
+    GuestSession,
 };
 use openoj_application::{JudgeRenewDirective, StoreError, TaskLease};
 use openoj_domain::{

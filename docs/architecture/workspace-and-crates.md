@@ -1,7 +1,7 @@
 ---
 status: Proposed
 owners: OpenOJ maintainers
-last_reviewed: 2026-08-16
+last_reviewed: 2026-08-25
 applies_to: Rust workspace and source layout
 references:
   - overview.md
@@ -12,7 +12,7 @@ references:
 
 以下是首个垂直切片的目标布局；创建 workspace 时可以通过 ADR 调整名称，但不得破坏依赖方向。
 
-P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0-B 增加 `openoj-storage` 和 `openoj-cli`：前者负责 PostgreSQL migration、兼容检查、持久化 transaction 和可靠 task/outbox，后者只组装 migration、提交和状态查询命令。P0-C 增加 `openoj-judge-protocol`、`openoj-judge-core`、`openoj-control-plane` 和 `openoj-judge-node`，交付 UDS gRPC Judge Control 契约、单并发 worker 与显式 development mock，形成真实双进程闭环。P0-D 增加 `openoj-guest-protocol`（guest↔host vsock 有界消息 codec)、`openoj-firecracker`（jailer/VMM/vsock/control-API 系统适配器）、`openoj-guest-agent`（guest 内受限 vsock 命令 agent）与 `openoj-evaluator`（宿主侧阶段映射与结构化 check），并在 `openoj-judge-node` 组装显式、仅 development 可用的 Firecracker executor；production profile 在强制隔离层完整实现前 fail closed。未实现组件不创建空 crate，每增加一个 crate 都必须同时交付其边界行为和测试。
+P0-A 已实现 `openoj-domain`、`openoj-protocol` 和 `openoj-application`。P0-B 增加 `openoj-storage` 和 `openoj-cli`：前者负责 PostgreSQL migration、兼容检查、持久化 transaction 和可靠 task/outbox，后者只组装 migration、提交和状态查询命令。P0-C 增加 `openoj-judge-protocol`、`openoj-judge-core`、`openoj-control-plane` 和 `openoj-judge-node`，交付 UDS gRPC Judge Control 契约、单并发 worker 与显式 development mock，形成真实双进程闭环。P0-D 增加 `openoj-guest-protocol`（guest↔host vsock 有界消息 codec)、`openoj-firecracker`（jailer/VMM/vsock/control-API 系统适配器）、`openoj-guest-agent`（guest 内受限 vsock 命令 agent）与 `openoj-evaluator`（宿主侧阶段映射与结构化 check），并在 `openoj-judge-node` 组装显式、仅 development 可用的 Firecracker executor。该 executor 的本地 Artifact bridge 只接受部署配置中的单个有界文件，并在启动 guest 前匹配请求摘要、大小、媒体类型和 Runtime 摘要；production profile 在强制隔离层和正式 Artifact backend 完整实现前 fail closed。未实现组件不创建空 crate，每增加一个 crate 都必须同时交付其边界行为和测试。
 
 ```text
 apps/
@@ -71,7 +71,7 @@ plugin-host <- application capability adapters
 - `openoj-application` 编排用例并依赖 trait，不依赖具体数据库和 VMM 实现。
 - `openoj-storage` 实现持久化、transaction、outbox 和 migration，不把数据库类型泄漏到 domain。
 - `openoj-firecracker` 封装 jailer/VMM、vsock、磁盘、网络和回收；不得包含用户、竞赛或计分逻辑。
-- `openoj-judge-node` 组合执行适配器，不能访问控制平面数据库超级权限。
+- `openoj-judge-node` 组合执行适配器，不能访问控制平面数据库超级权限；development 本地 Artifact 路径只能来自受信部署配置，不能来自 Evaluation 请求。
 - `openoj-guest-agent` 面向最小 guest 环境，只依赖 guest 所需协议，不依赖控制平面 crate。
 - `openoj-plugin-host` 是能力 Broker；插件不能直接获取存储、网络或宿主句柄。
 - `apps` 只负责进程组装、配置、生命周期和边界日志，不承载可复用领域实现。
