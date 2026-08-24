@@ -85,12 +85,13 @@ pub fn handle(message: Message, work: &Path) -> Result<Option<Message>, AgentErr
         Message::Negotiate { capabilities } => Ok(Some(Message::Negotiated {
             supported: accepts_capabilities(&capabilities),
         })),
-        Message::UploadInput { name, bytes, .. } => {
-            write_input(work, &name, &bytes)?;
-            Ok(Some(Message::UploadAck {
-                name,
-                accepted: true,
-            }))
+        Message::UploadInput {
+            name,
+            digest,
+            bytes,
+        } => {
+            let accepted = write_input(work, &name, &digest, &bytes)?;
+            Ok(Some(Message::UploadAck { name, accepted }))
         }
         Message::Build { argv, wall_time_ms } => {
             Ok(Some(stage_output(Stage::Build, &argv, work, wall_time_ms)?))
@@ -110,17 +111,16 @@ pub fn handle(message: Message, work: &Path) -> Result<Option<Message>, AgentErr
     }
 }
 
-fn write_input(work: &Path, name: &str, bytes: &[u8]) -> Result<(), AgentError> {
-    let input_dir = work.join(INPUT_DIR);
-    if !input_dir.is_dir() {
-        std::fs::create_dir_all(&input_dir)?;
-    }
+fn write_input(work: &Path, name: &str, digest: &str, bytes: &[u8]) -> Result<bool, AgentError> {
     let path = safe_input_path(work, name)?;
+    if digest != hex(Sha256::digest(bytes)) {
+        return Ok(false);
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, bytes)?;
-    Ok(())
+    Ok(true)
 }
 
 fn safe_input_path(work: &Path, name: &str) -> Result<PathBuf, AgentError> {
@@ -380,11 +380,12 @@ mod tests {
     #[test]
     fn upload_persists_into_input_dir() -> Result<(), Box<dyn std::error::Error>> {
         let work = work_dir();
+        let bytes = b"hello";
         let response = handle(
             Message::UploadInput {
                 name: "main.txt".to_owned(),
-                digest: "sha256:x".to_owned(),
-                bytes: b"hello".to_vec(),
+                digest: hex(Sha256::digest(bytes)),
+                bytes: bytes.to_vec(),
             },
             &work,
         )?;
@@ -401,12 +402,38 @@ mod tests {
     }
 
     #[test]
+    fn upload_digest_mismatch_is_rejected_without_persisting()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let work = work_dir();
+        let name = "digest-mismatch.txt";
+        let persisted = work.join(INPUT_DIR).join(name);
+        let _ = std::fs::remove_file(&persisted);
+        let response = handle(
+            Message::UploadInput {
+                name: name.to_owned(),
+                digest: "0".repeat(64),
+                bytes: b"tampered".to_vec(),
+            },
+            &work,
+        )?;
+        assert_eq!(
+            response,
+            Some(Message::UploadAck {
+                name: name.to_owned(),
+                accepted: false,
+            })
+        );
+        assert!(!persisted.exists());
+        Ok(())
+    }
+
+    #[test]
     fn malicious_upload_name_is_rejected() {
         let work = work_dir();
         let result = handle(
             Message::UploadInput {
                 name: "../../etc/passwd".to_owned(),
-                digest: "sha256:x".to_owned(),
+                digest: hex(Sha256::digest([])),
                 bytes: Vec::new(),
             },
             &work,

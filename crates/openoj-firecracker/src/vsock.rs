@@ -13,7 +13,8 @@
 use std::io::{Error as IoError, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use openoj_guest_protocol::{CodecError, MAX_FRAME_BYTES, Message};
 
@@ -21,6 +22,15 @@ use crate::config::FirecrackerError;
 
 /// Default guest read timeout; an unresponsive guest fails closed.
 pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Per-attempt timeout while Firecracker waits for the guest vsock listener.
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Total readiness budget after a microVM has started.
+pub const DEFAULT_CONNECT_WAIT: Duration = Duration::from_secs(10);
+
+/// Poll interval between guest readiness attempts.
+pub const DEFAULT_CONNECT_POLL: Duration = Duration::from_millis(50);
 
 /// Firecracker's success reply prefix to a `CONNECT` request.
 const CONNECT_OK_PREFIX: &str = "OK ";
@@ -46,6 +56,12 @@ impl GuestChannel {
         let mut stream = UnixStream::connect(uds_path).map_err(|error| FirecrackerError::Io {
             message: format!("vsock unix connect failed: {error}"),
         })?;
+        stream
+            .set_read_timeout(Some(DEFAULT_CONNECT_TIMEOUT))
+            .and_then(|()| stream.set_write_timeout(Some(DEFAULT_CONNECT_TIMEOUT)))
+            .map_err(|error| FirecrackerError::Io {
+                message: format!("set vsock CONNECT timeout failed: {error}"),
+            })?;
         let handshake = format!("CONNECT {port}\n");
         stream
             .write_all(handshake.as_bytes())
@@ -63,12 +79,24 @@ impl GuestChannel {
         }
         stream
             .set_read_timeout(Some(read_timeout))
+            .and_then(|()| stream.set_write_timeout(Some(read_timeout)))
             .map_err(|error| FirecrackerError::Io {
-                message: format!("set read timeout failed: {error}"),
+                message: format!("set guest channel timeout failed: {error}"),
             })?;
         Ok(Self {
             stream,
             read_timeout,
+        })
+    }
+
+    /// Connects within a bounded readiness window while the guest boots.
+    pub(crate) fn connect_until_ready(
+        uds_path: &Path,
+        port: u32,
+        read_timeout: Duration,
+    ) -> Result<Self, FirecrackerError> {
+        retry_until(DEFAULT_CONNECT_WAIT, DEFAULT_CONNECT_POLL, || {
+            Self::connect(uds_path, port, read_timeout)
         })
     }
 
@@ -115,6 +143,28 @@ impl GuestChannel {
     #[must_use]
     pub const fn read_timeout(&self) -> Duration {
         self.read_timeout
+    }
+}
+
+fn retry_until<T>(
+    wait: Duration,
+    poll: Duration,
+    mut operation: impl FnMut() -> Result<T, FirecrackerError>,
+) -> Result<T, FirecrackerError> {
+    let deadline = Instant::now() + wait;
+    loop {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(FirecrackerError::Io {
+                        message: format!("guest channel readiness timed out: {error}"),
+                    });
+                }
+                thread::sleep(poll.min(remaining));
+            }
+        }
     }
 }
 
@@ -233,5 +283,35 @@ mod tests {
         read_line(&mut reply, &mut line)?;
         assert!(line.starts_with(CONNECT_OK_PREFIX));
         Ok(())
+    }
+
+    #[test]
+    fn guest_readiness_retries_transient_failures() -> Result<(), Box<dyn std::error::Error>> {
+        let mut attempts = 0;
+        let value = retry_until(Duration::from_secs(1), Duration::ZERO, || {
+            attempts += 1;
+            if attempts < 3 {
+                return Err(FirecrackerError::Io {
+                    message: "guest not ready".to_owned(),
+                });
+            }
+            Ok(42)
+        })?;
+        assert_eq!(value, 42);
+        assert_eq!(attempts, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn guest_readiness_timeout_is_bounded() {
+        let result = retry_until(Duration::ZERO, Duration::ZERO, || {
+            Err::<(), _>(FirecrackerError::Io {
+                message: "guest not ready".to_owned(),
+            })
+        });
+        assert!(matches!(
+            result,
+            Err(FirecrackerError::Io { message }) if message.contains("readiness timed out")
+        ));
     }
 }

@@ -1,0 +1,43 @@
+OpenOJ algorithm-c runtime smoke validation transcript (condensed)
+Date: 2026-08-23 Asia/Shanghai
+Target commit: 623913e009156cce50b4422e51f30b0ab68fcdf6
+
+Host
+  Linux archlinux 7.1.8-zen1-3-zen x86_64
+  AMD Ryzen 9 9950X3D; 8 visible CPUs; AMD-V; 15 GiB memory
+  rustc/cargo 1.97.1; Firecracker 1.16.1
+  /dev/kvm absent; DATABASE_URL unset; PostgreSQL unavailable
+
+Runtime outputs (ignored local out/ directory)
+  kernel       882fa465c43ab7d92e31bd4167da3ad6a82cb9230f9b0016176df597c6014cef
+  rootfs       0336f040e0dfaeffd37c50f44156f5c26f45ef080908e0a2feeefa8d207a053e
+  guest agent  e775d7d0fe71b8980a58ad02b2a9b8ac1195d6b32fc745db659750e46373cae2
+  toolchain    5d60f2080509113459fe14dca82594c87016f5a869c26351d9d6b2af55bb51c6
+  manifest     b5b164a8ea23898e5c96021e1257e69ef576a350d286132c2da8e7759af0522b
+  SPDX SBOM    aee7b475b81add5b58f497accdad5d4ef10a5ba8ad06e89007e2427e904ecddb
+
+PASS
+  offline provision from verified cache
+  manifest.sha256: kernel, rootfs, guest agent, manifest, SBOM
+  debugfs uid/gid inspection: init, guest agent, cc all 0:0
+  cargo fmt --all -- --check
+  cargo check --workspace --all-targets --locked
+  cargo clippy --workspace --all-targets --locked -- -D warnings
+  cargo test --workspace --all-targets --locked --exclude openoj-storage --exclude openoj-cli --exclude openoj-control-plane
+    113 test functions passed; KVM portion explicitly skipped after manifest verification
+  python3 scripts/check-workspace.py
+  cargo deny --locked check advisories bans sources (existing duplicate warnings only)
+  bash scripts/check-docs.sh
+  bash infra/runtime-images/algorithm-c/check.sh
+
+EXPECTED FAIL-CLOSED
+  OPENOJ_REQUIRE_KVM=1 cargo test -p openoj-firecracker --test boot --locked -- --nocapture
+  Error: strict KVM smoke requirement not met: /dev/kvm is absent or not read-write accessible
+
+ENVIRONMENT-BLOCKED
+  cargo test --workspace --all-targets --locked
+  Existing PostgreSQL CLI integration test stopped because DATABASE_URL is not set.
+
+UNVERIFIED
+  Real microVM guest readiness and all three C cases; production isolation; PostgreSQL/full E2E;
+  adversarial resource/host-survival matrix; reproducible rootfs; performance and production claims.

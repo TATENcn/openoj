@@ -16,9 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Install documentation checker dependencies
+      - name: Install repository checker dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes ripgrep
+          sudo apt-get install --yes jq ripgrep
       - name: Validate documentation governance
         run: bash scripts/check-docs.sh
+      - name: Validate runtime image source locks
+        run: bash infra/runtime-images/algorithm-c/check.sh
