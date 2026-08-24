@@ -1,7 +1,7 @@
 ---
-status: Implemented
+status: Validated
 owners: OpenOJ operations and security maintainers
-last_reviewed: 2026-08-23
+last_reviewed: 2026-08-25
 applies_to: development-only algorithm-c runtime image and KVM smoke validation
 references:
   - deployment-profiles.md
@@ -13,6 +13,7 @@ references:
   - ../security/trust-boundaries.md
   - ../development/testing.md
   - ../governance/licensing.md
+  - ../validation/2026-08-25-algorithm-c-runtime-kvm.md
 ---
 
 # algorithm-c 开发运行时契约
@@ -26,6 +27,8 @@ Firecracker guest 内经受限 vsock 协议完成上传、编译、运行、宿�
 
 本运行时不得用于公开服务或生产 workload。`OPENOJ_FC_PRODUCTION=1` 必须继续 fail closed；
 缺少独立 uid/gid、jailer、cgroup、namespace、seccomp 与宿主 watchdog 时不得改变该边界。
+真实 KVM 验证只覆盖 `2026-08-25-algorithm-c-runtime-kvm.md` 声明的主机、镜像摘要和
+development smoke；其他环境与 production 约束保持 `Unverified`。
 
 ## 不可变输入与输出
 

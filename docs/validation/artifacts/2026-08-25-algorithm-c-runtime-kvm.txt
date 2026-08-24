@@ -1,0 +1,103 @@
+OpenOJ algorithm-c real-KVM smoke evidence
+Date: 2026-08-25T00:06:20+08:00
+Commit: 1fb82ec1e819082578a1ebf160a69b302ddb1b8f
+
+Environment
+-----------
+Linux 7.1.8-zen1-3-zen x86_64 GNU/Linux
+CPU: AMD Ryzen 9 9950X3D 16-Core Processor; 8 visible CPUs; AMD-V
+Hypervisor: VMware
+Memory: 15 GiB; 4 GiB swap
+/dev/kvm: crw-rw-rw- uid=0 gid=990 major_minor=a:e8
+KVM API version: 12
+Firecracker: 1.16.1
+rustc: 1.97.1 (8bab26f4f 2026-07-14)
+cargo: 1.97.1 (c980f4866 2026-06-30)
+
+RED reproduction before 1fb82ec
+-------------------------------
+$ OPENOJ_REQUIRE_KVM=1 cargo test -p openoj-firecracker --test boot --locked -- --nocapture
+running 1 test
+Error: Io { message: "guest channel readiness timed out: I/O error: vsock unix connect failed: Connection refused (os error 111)" }
+test algorithm_c_guest_compiles_runs_and_reclaims ... FAILED
+test result: FAILED. 0 passed; 1 failed; finished in 10.31s
+
+Serial diagnosis in a disposable audit copy showed that the pinned kernel had
+already mounted devtmpfs. PID 1 repeated that mount, received EBUSY, and exited.
+After making the mount conditional, the next boot exposed the absent /work
+mountpoint on the read-only rootfs. Commit 1fb82ec makes devtmpfs setup
+idempotent and creates /work in the immutable image before boot.
+
+Runtime assembly and integrity
+------------------------------
+$ bash infra/runtime-images/algorithm-c/check.sh
+algorithm-c runtime structure checks passed
+
+$ OPENOJ_RUNTIME_OFFLINE=1 OPENOJ_RUNTIME_CACHE=/tmp/openoj-algorithm-c-cache bash infra/runtime-images/algorithm-c/provision.sh
+Finished release profile
+assembled development-only algorithm-c runtime
+real KVM validation remains required
+
+$ sha256sum --check --strict manifest.sha256
+kernel/vmlinux.bin: OK
+rootfs/rootfs.ext4: OK
+agent/openoj-guest-agent: OK
+manifest.json: OK
+sbom.spdx.json: OK
+
+$ debugfs -R 'stat /work' rootfs.ext4
+Type: directory; Mode: 0700; User: 0; Group: 0
+
+Image SHA-256
+------------
+kernel/vmlinux.bin  882fa465c43ab7d92e31bd4167da3ad6a82cb9230f9b0016176df597c6014cef
+rootfs/rootfs.ext4  15fed4ac44dd5f0de02a6c9f0d9c85e3207fd897a238ea9f08781f2a9eab904c
+agent/openoj-guest-agent  e775d7d0fe71b8980a58ad02b2a9b8ac1195d6b32fc745db659750e46373cae2
+manifest.json  720941439956169beb8821f3afbf51842e82c8c5a71bc73fd61c2e7ded3dacc3
+sbom.spdx.json  aee7b475b81add5b58f497accdad5d4ef10a5ba8ad06e89007e2427e904ecddb
+C toolchain source lock  5d60f2080509113459fe14dca82594c87016f5a869c26351d9d6b2af55bb51c6
+
+GREEN real-KVM smoke
+--------------------
+$ OPENOJ_REQUIRE_KVM=1 cargo test -p openoj-firecracker --test boot --locked -- --nocapture
+running 1 test
+test algorithm_c_guest_compiles_runs_and_reclaims ... ok
+test result: ok. 1 passed; 0 failed; finished in 1.74s
+
+The single Rust integration test starts a fresh microVM for each case:
+- valid C compile/run with host verification of SHA-256("42\n");
+- invalid C compile with bounded diagnostics and no run stage;
+- infinite-loop C run with a 50 ms budget, exit 124 and bounded diagnostics.
+Every case performs two teardown calls and asserts Terminated plus removal of
+the Firecracker API and vsock UDS paths. A post-test pgrep found no Firecracker
+process owned by this test, and no per-test openoj-algorithm-c-* work directory
+remained. The separately configured offline input cache was intentionally kept.
+
+Workspace and repository gates
+------------------------------
+$ cargo fmt --all -- --check
+$ cargo check --workspace --all-targets --locked
+$ cargo clippy --workspace --all-targets --locked -- -D warnings
+$ cargo deny --locked check advisories bans sources
+$ python3 scripts/check-workspace.py
+$ bash scripts/check-docs.sh
+$ /tmp/openoj-skill-validator/bin/python <each applicable quick_validate.py>
+All passed. cargo-deny emitted only the repository's existing duplicate-version
+warnings. The applicable architecture, sandbox, development, verification and
+protocol skill validators each reported "Skill is valid!".
+
+A disposable PostgreSQL 18.6 container used image
+postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2,
+bound only to 127.0.0.1:55434 with /var/lib/postgresql on tmpfs. With both
+DATABASE_URL and OPENOJ_TEST_DATABASE_URL pointing to it:
+
+$ cargo test --workspace --all-targets --locked
+test result: 145 passed; 0 failed (summed across test binaries)
+
+This included 17 PostgreSQL control-spine tests, five control-plane/judge-node
+process E2E tests, the real-KVM Firecracker boot test, and production-profile
+fail-closed tests. The container was removed after the run.
+
+No control-plane-to-real-microVM end-to-end path, object-storage body path,
+production isolation, adversarial resource matrix, release benchmark or
+performance sampling ran in this evidence session.

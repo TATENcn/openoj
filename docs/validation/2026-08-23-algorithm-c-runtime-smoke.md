@@ -12,9 +12,14 @@ references:
   - ../security/threat-model.md
   - ../architecture/decisions/0005-firecracker-execution-plane.md
   - 2026-08-20-p0d-firecracker-boot.md
+  - 2026-08-25-algorithm-c-runtime-kvm.md
 ---
 
 # algorithm-c 开发运行时与严格 KVM smoke（2026-08-23）
+
+> 后续证据：`2026-08-25-algorithm-c-runtime-kvm.md` 已在 commit `1fb82ec` 和真实 KVM
+> 环境关闭本记录中的 guest readiness、C 编译运行、编译错误、运行超时与 socket 回收
+> `Unverified` 项。本记录保留当时无 KVM 环境的原始结论，不用于描述当前验证状态。
 
 ## 范围与结论
 
