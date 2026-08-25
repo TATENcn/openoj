@@ -8,9 +8,11 @@ use openoj_application::{
 use openoj_domain::{
     AttemptState, Capability, ClaimOperationId, EvaluationState, ExecutorKind, IdempotencyKey,
     LeaseDuration, LeaseToken, NodeId, ResourceUsage, ResultOperationId, Score, StageKind,
-    UnixMillis, Verdict,
+    StageStatus, UnixMillis, Verdict,
 };
-use openoj_protocol::{decode_evaluation_request, encode_evaluation_request};
+use openoj_protocol::{
+    decode_evaluation_request, decode_evaluation_result_domain, encode_evaluation_request,
+};
 use openoj_storage::PostgresEvaluationStore;
 use sqlx::PgPool;
 
@@ -58,34 +60,6 @@ impl StageExecutor for NodeDecisionExecutor {
             diagnostics: Vec::new(),
             evidence: Vec::new(),
             decision: (context.stage() == StageKind::Check).then_some(self.decision),
-        }
-    }
-}
-
-struct CancellationExecutor;
-
-impl StageExecutor for CancellationExecutor {
-    fn kind(&self) -> ExecutorKind {
-        ExecutorKind::DevelopmentMock
-    }
-
-    fn production_eligible(&self) -> bool {
-        false
-    }
-
-    fn node_id(&self) -> Option<NodeId> {
-        None
-    }
-
-    fn supports(&self, capability: &Capability) -> bool {
-        capability.as_str() == "algorithm.batch"
-    }
-
-    fn execute(&mut self, _context: StageContext<'_>) -> StageExecution {
-        StageExecution::Cancelled {
-            usage: ResourceUsage::default(),
-            diagnostics: Vec::new(),
-            evidence: Vec::new(),
         }
     }
 }
@@ -812,11 +786,9 @@ async fn queued_cancellation_is_atomic_and_idempotent(pool: PgPool) -> Result<()
             created_at: UnixMillis::new(10_000)?,
         })
         .await?;
-    let result = openoj_application::evaluate(&request, &mut CancellationExecutor)?;
     let command = CancelEvaluation {
         idempotency_key: IdempotencyKey::parse("cancel_key_01")?,
         evaluation_id: request.evaluation_id().clone(),
-        result,
         now: UnixMillis::new(10_100)?,
     };
 
@@ -832,6 +804,25 @@ async fn queued_cancellation_is_atomic_and_idempotent(pool: PgPool) -> Result<()
             .fetch_one(&pool)
             .await?;
     assert_eq!(task_state, "cancelled");
+    let payload: Vec<u8> =
+        sqlx::query_scalar("SELECT terminal_result FROM evaluations WHERE evaluation_id = $1")
+            .bind(request.evaluation_id().as_str())
+            .fetch_one(&pool)
+            .await?;
+    let result = decode_evaluation_result_domain(&payload)?;
+    assert_eq!(result.identity().evaluation_id(), request.evaluation_id());
+    assert_eq!(
+        result.provenance().executor_kind(),
+        ExecutorKind::DevelopmentMock
+    );
+    assert!(!result.provenance().production_eligible());
+    assert!(result.provenance().node_id().is_none());
+    assert_eq!(result.stages()[0].status(), StageStatus::Cancelled);
+    assert!(
+        result.stages()[1..]
+            .iter()
+            .all(|stage| stage.status() == StageStatus::Skipped)
+    );
     Ok(())
 }
 
@@ -864,7 +855,6 @@ async fn cancellation_and_completion_race_keeps_one_terminal_result(
             decision: Decision::new(Verdict::Accepted, Score::new(1, 1)?)?,
         },
     )?;
-    let cancelled_result = openoj_application::evaluate(&request, &mut CancellationExecutor)?;
     let result_control = ControlPlane::new(store.clone());
     let cancel_control = ControlPlane::new(store);
 
@@ -878,7 +868,6 @@ async fn cancellation_and_completion_race_keeps_one_terminal_result(
         cancel_control.cancel_evaluation(CancelEvaluation {
             idempotency_key: IdempotencyKey::parse("cancel_race")?,
             evaluation_id: request.evaluation_id().clone(),
-            result: cancelled_result,
             now: UnixMillis::new(11_500)?,
         })
     );

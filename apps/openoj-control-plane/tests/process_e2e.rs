@@ -8,15 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use openoj_application::{
-    CancelEvaluation, ControlPlane, StageContext, StageExecution, StageExecutor,
-};
-use openoj_domain::{
-    AttemptState, Capability, EvaluationState, ExecutorKind, IdempotencyKey, NodeId, ResourceUsage,
-    StageKind, StageStatus, UnixMillis, Verdict,
-};
-use openoj_protocol::{decode_evaluation_request, decode_evaluation_result_domain};
-use openoj_storage::{DatabasePoolSize, PostgresEvaluationStore};
+use openoj_domain::{ExecutorKind, StageKind, StageStatus, Verdict};
+use openoj_protocol::decode_evaluation_result_domain;
 
 const VALID_REQUEST: &str =
     include_str!("../../../schemas/openoj/v0alpha1/fixtures/evaluation-request.valid.json");
@@ -149,7 +142,6 @@ fn real_microvm_cancellation_interrupts_and_reclaims() -> Result<(), Box<dyn Err
         ALGORITHM_C_TIMEOUT_SOURCE.len(),
         8_000,
     )?;
-    let request = decode_evaluation_request(&fs::read(&request_path)?)?;
     let root = workspace_root()?;
 
     let mut control_plane = spawn_real_e2e_control_plane(&database_url, &socket_path)?;
@@ -168,32 +160,26 @@ fn real_microvm_cancellation_interrupts_and_reclaims() -> Result<(), Box<dyn Err
     wait_for_path(&api_socket, "Firecracker API socket")?;
     thread::sleep(Duration::from_secs(2));
 
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(PostgresEvaluationStore::connect(
-        &database_url,
-        DatabasePoolSize::new(4).ok_or("invalid test database pool size")?,
-    ))?;
-    let control = ControlPlane::new(store);
-    let mut cancellation_executor = CancellationResultExecutor;
-    let result = openoj_application::evaluate(&request, &mut cancellation_executor)?;
-    let command = CancelEvaluation {
-        idempotency_key: IdempotencyKey::parse("cancel_real_microvm_run")?,
-        evaluation_id: request.evaluation_id().clone(),
-        result,
-        now: current_unix_millis()?,
-    };
     let cancellation_started = Instant::now();
-    let cancelled = runtime.block_on(control.cancel_evaluation(command.clone()))?;
-    let replayed = runtime.block_on(control.cancel_evaluation(command))?;
-    assert_eq!(cancelled, replayed);
-    assert_eq!(cancelled.state, EvaluationState::Cancelled);
-    assert_eq!(cancelled.attempt_state, AttemptState::Cancelled);
+    let cancelled = cancel_evaluation(
+        &root,
+        &database_url,
+        &evaluation_id,
+        "cancel_real_microvm_run",
+    )?;
 
     wait_for_paths_absent(&[&api_socket, &vsock_socket], Duration::from_secs(3))?;
     assert!(
         cancellation_started.elapsed() < Duration::from_secs(3),
         "in-flight cancellation must reclaim before the guest stage deadline"
     );
+    let replayed = cancel_evaluation(
+        &root,
+        &database_url,
+        &evaluation_id,
+        "cancel_real_microvm_run",
+    )?;
+    assert_eq!(cancelled, replayed);
     assert!(
         judge_node.is_running()?,
         "judge node must survive cancellation"
@@ -353,34 +339,6 @@ fn assert_real_microvm_result(
     Ok(())
 }
 
-struct CancellationResultExecutor;
-
-impl StageExecutor for CancellationResultExecutor {
-    fn kind(&self) -> ExecutorKind {
-        ExecutorKind::DevelopmentMock
-    }
-
-    fn production_eligible(&self) -> bool {
-        false
-    }
-
-    fn node_id(&self) -> Option<NodeId> {
-        None
-    }
-
-    fn supports(&self, capability: &Capability) -> bool {
-        capability.as_str() == "algorithm.batch"
-    }
-
-    fn execute(&mut self, _context: StageContext<'_>) -> StageExecution {
-        StageExecution::Cancelled {
-            usage: ResourceUsage::default(),
-            diagnostics: Vec::new(),
-            evidence: Vec::new(),
-        }
-    }
-}
-
 fn assert_cancelled_microvm_result(
     result: &openoj_domain::EvaluationResult,
 ) -> Result<(), Box<dyn Error>> {
@@ -423,6 +381,33 @@ fn submit_request(
         .into());
     }
     Ok(())
+}
+
+fn cancel_evaluation(
+    root: &Path,
+    database_url: &str,
+    evaluation_id: &str,
+    idempotency_key: &str,
+) -> Result<String, Box<dyn Error>> {
+    let cancel = cargo_process(root, "openoj-cli")
+        .env("OPENOJ_DATABASE_URL", database_url)
+        .arg("cancel")
+        .arg(evaluation_id)
+        .arg(idempotency_key)
+        .output()?;
+    if !cancel.status.success() {
+        return Err(format!(
+            "CLI cancel process failed: {}",
+            String::from_utf8_lossy(&cancel.stderr)
+        )
+        .into());
+    }
+    let stdout = String::from_utf8(cancel.stdout)?;
+    assert!(
+        stdout.contains("state=cancelled terminal_result=true"),
+        "CLI cancellation must return the cancelled terminal, got: {stdout}"
+    );
+    Ok(stdout)
 }
 
 fn spawn_real_e2e_control_plane(
@@ -992,11 +977,6 @@ fn wait_for_paths_absent(paths: &[&Path], timeout: Duration) -> Result<(), Box<d
         thread::sleep(Duration::from_millis(25));
     }
     Err("timed out waiting for Firecracker resource reclamation".into())
-}
-
-fn current_unix_millis() -> Result<UnixMillis, Box<dyn Error>> {
-    let milliseconds = u64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis())?;
-    Ok(UnixMillis::new(milliseconds)?)
 }
 
 fn assert_cancelled_status(

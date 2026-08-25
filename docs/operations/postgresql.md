@@ -25,7 +25,7 @@ P0-B/P0-C 的 CI 目标是 PostgreSQL 18 隔离测试实例；P0-C 本地已在�
 
 ## 启动与迁移
 
-迁移是显式运维步骤，不由 `submit` 或 `status` 隐式执行：
+迁移是显式运维步骤，不由 `submit`、`status` 或 `cancel` 隐式执行：
 
 ```bash
 OPENOJ_DATABASE_URL='<secret>' \
@@ -36,9 +36,28 @@ OPENOJ_DATABASE_URL='<secret>' \
 1. 在维护窗口确认目标、备份状态、可恢复点和当前 `openoj_schema_metadata`。
 2. 先对备份恢复出的隔离实例运行同一二进制和 migration。
 3. 停止旧版本新写入，执行 `migrate`，确认输出 `migrated schema 2`。
-4. 再启动 `submit`/`status` 路径。缺表、损坏或高于应用支持版本的 schema 必须 fail closed；不得跳过兼容检查。
+4. 再启动 `submit`/`status`/`cancel` 路径。缺表、损坏或高于应用支持版本的 schema 必须 fail closed；不得跳过兼容检查。
 
 已共享 migration 只能新增，不能改写。当前 v2 以前向方式从 v1 的 canonical UTF-8 JSON `request_payload` 严格回填排序、去重的 task `required_capabilities`，并加入未来 P0-C claim operation ID 的索引位；非法 UTF-8、非 JSON、缺失/空/重复/超限或非法 capability 会使 migration 整体失败。升级必须交付旧版 fixture、重复执行、失败回滚和数据保留测试。
+
+## Development 取消命令
+
+持有 development 数据库凭证的受信 operator 可以发起幂等取消：
+
+```bash
+OPENOJ_DATABASE_URL='<secret>' \
+  cargo run --locked -p openoj-cli -- \
+  cancel <evaluation-id> <caller-stable-idempotency-key>
+```
+
+- 同一取消意图的超时重试必须复用相同幂等键；相同键与相同目标返回同一终态快照，不同终态或
+  键冲突 fail closed。
+- CLI 不接受 result 文件、Verdict、Score、Attempt、provenance、阶段或证据参数。storage 在同一
+  `FOR UPDATE` transaction 内读取当前 Attempt 的 canonical request，生成
+  `DevelopmentMock`、`production_eligible=false`、无 node provenance 的取消结果并提交
+  first-terminal-wins 写入；该 provenance 表示控制面决策，不伪装成 guest/Firecracker 证据。
+- 当前命令是直连 PostgreSQL 的 development 运维入口，不含主体认证、scope、审批或结构化审计，
+  不得向不可信用户暴露，也不构成 production 管理 API。正式服务入口仍需满足 `ACC-P0-011/019`。
 
 ## 备份、回滚与事故处理
 
@@ -54,3 +73,4 @@ OPENOJ_DATABASE_URL='<secret>' \
 - 大规模竞争、连接池容量、vacuum、索引膨胀、吞吐和尾延迟。
 - 真实进程被强杀、主机重启、网络分区和跨版本滚动升级。
 - 数据修复工具、自动备份与恢复演练。
+- production 取消 API 的认证、授权、审批、限流和结构化审计。

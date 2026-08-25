@@ -96,8 +96,11 @@ agent readiness 必须让测试失败。
 3. 编译错误和运行超时返回确定阶段结果，不伪造后续成功；
 4. 重复 teardown 幂等，VMM 与 socket 不残留；
 5. guest 未配置网络设备，未接收平台秘密。
-6. 执行中取消与租约丢失会在下一个协商续租周期触发当前 VMM 强制终止；worker 等待 teardown、
-   不提交被取消执行的结果，并保持 judge 进程可继续领取任务。
+6. 受信 development operator 可执行
+   `openoj-cli cancel <evaluation-id> <caller-stable-idempotency-key>`；执行中取消与租约丢失会在
+   下一个协商续租周期触发当前 VMM 强制终止，worker 等待 teardown、不提交被取消执行的结果，
+   并保持 judge 进程可继续领取任务。该直连数据库入口不替代 production 管理 API 的认证、授权
+   与审计。
 
 验证记录必须包含主机、内核、KVM、Firecracker、构建类型、所有镜像摘要、输入 fixture、
 完整命令、结果和未验证项。没有真实 KVM 证据时文档状态保持 `Proposed` 或

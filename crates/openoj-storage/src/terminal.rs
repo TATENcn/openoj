@@ -159,13 +159,6 @@ pub async fn cancel_evaluation(
     pool: &PgPool,
     command: CancelEvaluation,
 ) -> Result<EvaluationSnapshot, StoreError> {
-    if command.result.status() != EvaluationStatus::Cancelled
-        || command.result.identity().evaluation_id() != &command.evaluation_id
-    {
-        return Err(StoreError::IdentityConflict);
-    }
-    let payload = openoj_protocol::encode_evaluation_result(&command.result)
-        .map_err(|_| StoreError::CorruptData)?;
     let now = i64::try_from(command.now.value()).map_err(|_| StoreError::InvalidTime)?;
     let mut transaction = pool.begin().await.map_err(|_| StoreError::Unavailable)?;
     let row = sqlx::query(
@@ -180,6 +173,19 @@ pub async fn cancel_evaluation(
     .await
     .map_err(|_| StoreError::Unavailable)?
     .ok_or(StoreError::NotFound)?;
+
+    let request_payload: Vec<u8> = row
+        .try_get("request_payload")
+        .map_err(|_| StoreError::CorruptData)?;
+    let request = openoj_protocol::decode_evaluation_request(&request_payload)
+        .map_err(|_| StoreError::CorruptData)?;
+    if request.evaluation_id() != &command.evaluation_id {
+        return Err(StoreError::IdentityConflict);
+    }
+    let result =
+        openoj_application::cancellation_result(&request).map_err(|_| StoreError::CorruptData)?;
+    let payload =
+        openoj_protocol::encode_evaluation_result(&result).map_err(|_| StoreError::CorruptData)?;
 
     let stored_result: Option<Vec<u8>> = row
         .try_get("terminal_result")
@@ -215,15 +221,10 @@ pub async fn cancel_evaluation(
     let current_attempt_id: String = row
         .try_get("current_attempt_id")
         .map_err(|_| StoreError::CorruptData)?;
-    if current_attempt_id != command.result.identity().attempt_id().as_str() {
+    if current_attempt_id != result.identity().attempt_id().as_str() {
         return Err(StoreError::IdentityConflict);
     }
-    let request_payload: Vec<u8> = row
-        .try_get("request_payload")
-        .map_err(|_| StoreError::CorruptData)?;
-    let request = openoj_protocol::decode_evaluation_request(&request_payload)
-        .map_err(|_| StoreError::CorruptData)?;
-    if EvaluationIdentity::from_request(&request) != *command.result.identity() {
+    if EvaluationIdentity::from_request(&request) != *result.identity() {
         return Err(StoreError::IdentityConflict);
     }
 
