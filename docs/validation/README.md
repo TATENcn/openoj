@@ -38,3 +38,4 @@ references:
 - `2026-08-25-algorithm-c-process-failures.md`：真实进程闭环持久化 CompileError 与 TimeLimitExceeded，保留失败证据并跳过后续阶段。
 - `2026-08-25-algorithm-c-cancellation-race.md`：真实 microVM workload 期间验证取消终态优先、幂等重放、迟到结果 fencing 与有界最终回收，并明确即时中断仍未实现。
 - `2026-08-26-inflight-microvm-cancellation.md`：真实 microVM workload 期间以 Attempt 级 VMM 句柄即时中断取消执行，验证周期续租、提交前 fencing、3 秒内回收与 judge 存活。
+- `2026-08-26-operator-cancel-command.md`：以受限、幂等 CLI 意图触发真实 microVM 取消，验证 storage 从持久化请求生成 canonical 终态且调用者不能注入结果证据。

@@ -1,0 +1,117 @@
+OpenOJ development operator cancellation command validation
+Date: 2026-08-26 Asia/Shanghai
+Implementation commit: 60bdbe73dde3c390f0756bc5665c2c2567d50d6f
+
+Environment
+Linux 7.1.8-zen1-3-zen x86_64
+AMD Ryzen 9 9950X3D, 8 visible CPUs, 15 GiB memory, VMware AMD-V
+/dev/kvm crw-rw-rw- root:kvm; KVM API version 12
+Firecracker v1.16.1
+Rust/Cargo 1.97.1
+PostgreSQL 18-alpine image:
+postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+
+Runtime artifacts
+kernel: 882fa465c43ab7d92e31bd4167da3ad6a82cb9230f9b0016176df597c6014cef
+rootfs: 4f4121a3f5ea7dc6e34e63f3d704b77f3da30aebb3d7d55f846b13badff3461c
+guest agent: e775d7d0fe71b8980a58ad02b2a9b8ac1195d6b32fc745db659750e46373cae2
+manifest: c89e99d95ed258901bda15d00c9154e956ab1295d3f4043d771394ed5461a23b
+SPDX SBOM: aee7b475b81add5b58f497accdad5d4ef10a5ba8ad06e89007e2427e904ecddb
+manifest checksum file: 3a0e0453a74c917ebb5ff573f69f05e004f509aaad2cd6ae4f8f9732d02917dc
+
+Command boundary
+$ OPENOJ_DATABASE_URL=<isolated-postgresql-18> cargo run --locked -p openoj-cli -- \
+    cancel <evaluation-id> <caller-stable-idempotency-key>
+
+Accepted caller input
+- one bounded EvaluationId
+- one bounded IdempotencyKey that the caller must reuse for the same retryable intent
+- process time converted to bounded UnixMillis
+
+Rejected caller-controlled result fields
+- canonical EvaluationResult payload
+- Attempt identity
+- EvaluationStatus, Verdict or Score
+- execution provenance or node identity
+- stage reports, resource usage, diagnostics or evidence
+
+Atomic storage behavior
+- lock the current Evaluation and Attempt with SELECT ... FOR UPDATE
+- decode the already persisted canonical EvaluationRequest
+- verify the request EvaluationId and current Attempt identity
+- build the cancellation result in the application layer with DevelopmentMock,
+  production_eligible=false and no node provenance
+- encode and commit one first-terminal-wins result in the same transaction
+- replay the same target/key/result as the same snapshot
+- reject a different terminal intent or conflicting key without overwriting the result
+
+Focused CLI and storage tests
+$ DATABASE_URL=<isolated-postgresql-18> OPENOJ_TEST_DATABASE_URL=<same> \
+    cargo test -p openoj-application -p openoj-storage -p openoj-cli \
+    --all-targets --locked
+PASS
+
+$ DATABASE_URL=<isolated-postgresql-18> OPENOJ_TEST_DATABASE_URL=<same> \
+    cargo test -p openoj-cli --test cli --locked
+PASS (4 tests, 0.42 s)
+
+Coverage
+- the parser accepts exactly migrate, submit, status and cancel with bounded arity
+- malformed EvaluationId and IdempotencyKey values are rejected before storage
+- queued cancellation is atomic and idempotent
+- the persisted cancellation payload has non-production, no-node provenance
+- a different cancellation key after the terminal is rejected through a declassified CLI error
+- cancellation and completion racing under PostgreSQL preserve exactly one terminal result
+
+Real-KVM process cancellation
+$ DATABASE_URL=<isolated-postgresql-18> OPENOJ_TEST_DATABASE_URL=<same> \
+    OPENOJ_REQUIRE_KVM=1 OPENOJ_FC_TEST_IMAGES=<algorithm-c-runtime-out> \
+    cargo test -p openoj-control-plane --test process_e2e \
+    real_microvm_cancellation_interrupts_and_reclaims \
+    --locked -- --nocapture --test-threads=1
+PASS (1 test, 10.34 s)
+
+Assertions
+- CLI submit creates the Evaluation and CLI cancel commits the canonical cancelled terminal
+- the same CLI cancellation replay returns the same snapshot
+- a real 8-second infinite-loop microVM is interrupted and its API/vsock paths are absent in
+  less than 3 seconds
+- the judge process remains alive and CLI status observes state=cancelled terminal_result=true
+- the persisted result cannot claim Firecracker or judge-node provenance
+
+Workspace gates
+cargo fmt --all -- --check: PASS
+cargo check --workspace --all-targets --locked: PASS
+cargo clippy --workspace --all-targets --locked -- -D warnings: PASS
+DATABASE_URL=<isolated-postgresql-18> OPENOJ_TEST_DATABASE_URL=<same> OPENOJ_REQUIRE_KVM=1 \
+  OPENOJ_FC_TEST_IMAGES=<algorithm-c-runtime-out> \
+  cargo test --workspace --all-targets --locked: PASS (157 tests)
+process_e2e: PASS (9 tests, 17.41 s)
+strict algorithm-c KVM runtime smoke: PASS (1 test, 1.73 s)
+PostgreSQL control-spine: PASS (17 tests, 1.74 s)
+cargo deny --locked check advisories bans sources: PASS (existing duplicate-version warnings only)
+python3 scripts/check-workspace.py: PASS
+bash scripts/check-docs.sh: PASS before adding this record
+change-openoj-architecture, develop-openoj and verify-openoj quick validators: PASS
+
+Compatibility
+Canonical schema and generated bindings: unchanged
+Host protocol version: v0alpha1 (unchanged)
+Guest protocol version: v0alpha1 (unchanged)
+Database schema and migrations: unchanged
+Rust API: unpublished internal CancelEvaluation no longer accepts EvaluationResult
+
+Unverified and explicit limitations
+- production cancellation API authentication, authorization, subject identity, approval, scopes,
+  rate limits and structured audit
+- the direct PostgreSQL CLI must not be exposed to untrusted users
+- stage-accurate cancellation position; the current canonical control-plane cancellation marks the
+  first planned stage cancelled because live stage progress is not durably tracked
+- real-KVM lease-loss and control UDS disconnect interruption
+- cooperative guest Cancel consumption during a running workload
+- production jailer/cgroup/seccomp/watchdog profiles and the resource-exhaustion matrix
+
+Cleanup
+No Firecracker process remained after validation. Per-test databases were dropped. The task-local
+PostgreSQL container is removed after documentation validation. Shared ignored runtime outputs
+were retained.
