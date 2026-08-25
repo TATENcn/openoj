@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -120,7 +120,7 @@ fn real_microvm_timeout_is_persisted_and_reclaimed() -> Result<(), Box<dyn Error
 }
 
 #[test]
-fn real_microvm_cancellation_wins_late_result_and_reclaims() -> Result<(), Box<dyn Error>> {
+fn real_microvm_cancellation_interrupts_and_reclaims() -> Result<(), Box<dyn Error>> {
     let Some(images) = load_runtime_images()? else {
         return unavailable("algorithm-c runtime images are not provisioned");
     };
@@ -182,21 +182,27 @@ fn real_microvm_cancellation_wins_late_result_and_reclaims() -> Result<(), Box<d
         result,
         now: current_unix_millis()?,
     };
+    let cancellation_started = Instant::now();
     let cancelled = runtime.block_on(control.cancel_evaluation(command.clone()))?;
     let replayed = runtime.block_on(control.cancel_evaluation(command))?;
     assert_eq!(cancelled, replayed);
     assert_eq!(cancelled.state, EvaluationState::Cancelled);
     assert_eq!(cancelled.attempt_state, AttemptState::Cancelled);
 
-    let node_status = judge_node.wait_for_exit(Duration::from_secs(15))?;
+    wait_for_paths_absent(&[&api_socket, &vsock_socket], Duration::from_secs(3))?;
     assert!(
-        !node_status.success(),
-        "judge node must reject its late result after cancellation"
+        cancellation_started.elapsed() < Duration::from_secs(3),
+        "in-flight cancellation must reclaim before the guest stage deadline"
+    );
+    assert!(
+        judge_node.is_running()?,
+        "judge node must survive cancellation"
     );
     assert_cancelled_status(&root, &database_url, &evaluation_id)?;
     let persisted = persisted_result(&database_url, &evaluation_id)?;
     assert_cancelled_microvm_result(&persisted)?;
 
+    judge_node.stop();
     control_plane.stop();
     assert!(
         !api_socket.exists(),
@@ -428,6 +434,8 @@ fn spawn_real_e2e_control_plane(
             .env("OPENOJ_DATABASE_URL", database_url)
             .env("OPENOJ_JUDGE_CONTROL_SOCKET", socket_path)
             .env("OPENOJ_JUDGE_NODES", "judge_node_fc_01:algorithm.batch")
+            .env("OPENOJ_LEASE_DURATION_MS", "3000")
+            .env("OPENOJ_RENEW_AFTER_MS", "250")
             .stdout(Stdio::null())
             .stderr(Stdio::null()),
     )
@@ -975,6 +983,17 @@ fn wait_for_path(path: &Path, description: &str) -> Result<(), Box<dyn Error>> {
     Err(format!("timed out waiting for {description}").into())
 }
 
+fn wait_for_paths_absent(paths: &[&Path], timeout: Duration) -> Result<(), Box<dyn Error>> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if paths.iter().all(|path| !path.exists()) {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    Err("timed out waiting for Firecracker resource reclamation".into())
+}
+
 fn current_unix_millis() -> Result<UnixMillis, Box<dyn Error>> {
     let milliseconds = u64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis())?;
     Ok(UnixMillis::new(milliseconds)?)
@@ -1085,15 +1104,8 @@ impl ChildGuard {
         let _ignored = self.0.wait();
     }
 
-    fn wait_for_exit(&mut self, timeout: Duration) -> Result<ExitStatus, Box<dyn Error>> {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            if let Some(status) = self.0.try_wait()? {
-                return Ok(status);
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-        Err("child process did not exit before the deadline".into())
+    fn is_running(&mut self) -> Result<bool, Box<dyn Error>> {
+        Ok(self.0.try_wait()?.is_none())
     }
 }
 

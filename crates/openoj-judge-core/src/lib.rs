@@ -1,5 +1,8 @@
 //! Transport-neutral Judge Node worker components.
 
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
+
 use openoj_application::{
     ApplicationError, Decision, JudgeRenewDirective, StageContext, StageExecution, StageExecutor,
     StoreError, TaskLease, evaluate,
@@ -20,6 +23,29 @@ pub trait JudgeExecutor {
         &mut self,
         request: &EvaluationRequest,
     ) -> Result<EvaluationResult, ApplicationError>;
+
+    /// Returns a least-authority handle for interrupting the current execution.
+    fn cancellation_handle(&self) -> Box<dyn ExecutionCancellation> {
+        Box::new(NoopCancellation)
+    }
+}
+
+/// Interrupts one executor without granting access to its request or result.
+pub trait ExecutionCancellation: Send + Sync {
+    /// Requests bounded execution teardown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an execution error when teardown cannot be requested safely.
+    fn cancel(&self) -> Result<(), ApplicationError>;
+}
+
+struct NoopCancellation;
+
+impl ExecutionCancellation for NoopCancellation {
+    fn cancel(&self) -> Result<(), ApplicationError> {
+        Ok(())
+    }
 }
 
 /// Transport-neutral control operations required by a one-task worker iteration.
@@ -46,6 +72,9 @@ pub trait JudgeControlClient {
 
 /// Async transport-neutral control operations for a Judge Node process.
 pub trait AsyncJudgeControlClient: Send {
+    /// Returns the bounded renewal cadence negotiated with the control plane.
+    fn renewal_interval(&self) -> Duration;
+
     /// Claims at most one task for a stable operation identifier.
     ///
     /// # Errors
@@ -94,13 +123,15 @@ pub enum WorkerOutcome {
 
 /// Single-concurrency Judge Node worker.
 pub struct Worker<E> {
-    executor: E,
+    executor: Arc<Mutex<E>>,
 }
 
 impl<E> Worker<E> {
     #[must_use]
-    pub const fn new(executor: E) -> Self {
-        Self { executor }
+    pub fn new(executor: E) -> Self {
+        Self {
+            executor: Arc::new(Mutex::new(executor)),
+        }
     }
 }
 
@@ -119,7 +150,7 @@ impl<E: JudgeExecutor> Worker<E> {
         match client.claim(claim_operation_id)? {
             WorkerClaim::NoTask => Ok(WorkerOutcome::NoTask),
             WorkerClaim::Lease(lease) => {
-                let result = self.executor.execute(&lease.request)?;
+                let result = lock_executor(&self.executor)?.execute(&lease.request)?;
                 client.submit(&lease, result_operation_id, result)?;
                 Ok(WorkerOutcome::Submitted)
             }
@@ -127,7 +158,7 @@ impl<E: JudgeExecutor> Worker<E> {
     }
 }
 
-impl<E: JudgeExecutor + Send> Worker<E> {
+impl<E: JudgeExecutor + Send + 'static> Worker<E> {
     /// Claims, executes, and submits at most one task using an async control transport.
     ///
     /// # Errors
@@ -145,18 +176,77 @@ impl<E: JudgeExecutor + Send> Worker<E> {
                 if client.renew(&lease).await? == JudgeRenewDirective::Cancel {
                     return Ok(WorkerOutcome::Cancelled);
                 }
-                let result = self.executor.execute(&lease.request)?;
-                client.submit(&lease, result_operation_id, result).await?;
-                Ok(WorkerOutcome::Submitted)
+                self.execute_with_renewal(client, &lease, result_operation_id)
+                    .await
             }
         }
     }
+
+    async fn execute_with_renewal<C: AsyncJudgeControlClient>(
+        &self,
+        client: &mut C,
+        lease: &TaskLease,
+        result_operation_id: ResultOperationId,
+    ) -> Result<WorkerOutcome, WorkerError> {
+        let cancellation = lock_executor(&self.executor)?.cancellation_handle();
+        let executor = Arc::clone(&self.executor);
+        let request = lease.request.clone();
+        let mut execution = tokio::task::spawn_blocking(move || {
+            lock_executor(&executor)?
+                .execute(&request)
+                .map_err(Into::into)
+        });
+
+        loop {
+            tokio::select! {
+                joined = &mut execution => {
+                    let result = joined.map_err(|_| WorkerError::ExecutorTaskFailed)??;
+                    if client.renew(lease).await? == JudgeRenewDirective::Cancel {
+                        return Ok(WorkerOutcome::Cancelled);
+                    }
+                    client.submit(lease, result_operation_id, result).await?;
+                    return Ok(WorkerOutcome::Submitted);
+                }
+                () = tokio::time::sleep(client.renewal_interval()) => {
+                    match client.renew(lease).await {
+                        Ok(JudgeRenewDirective::Continue { .. }) => {}
+                        Ok(JudgeRenewDirective::Cancel) => {
+                            stop_execution(cancellation.as_ref(), execution).await?;
+                            return Ok(WorkerOutcome::Cancelled);
+                        }
+                        Err(error) => {
+                            stop_execution(cancellation.as_ref(), execution).await?;
+                            return Err(error.into());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn lock_executor<E>(executor: &Arc<Mutex<E>>) -> Result<MutexGuard<'_, E>, WorkerError> {
+    executor.lock().map_err(|_| WorkerError::ExecutorTaskFailed)
+}
+
+async fn stop_execution<T>(
+    cancellation: &dyn ExecutionCancellation,
+    execution: tokio::task::JoinHandle<Result<T, WorkerError>>,
+) -> Result<(), WorkerError> {
+    let cancellation_result = cancellation.cancel();
+    let joined = execution
+        .await
+        .map_err(|_| WorkerError::ExecutorTaskFailed)?;
+    cancellation_result?;
+    let _ignored_execution_result = joined;
+    Ok(())
 }
 
 #[derive(Debug)]
 pub enum WorkerError {
     Store(StoreError),
     Application(ApplicationError),
+    ExecutorTaskFailed,
 }
 
 impl From<StoreError> for WorkerError {
@@ -176,6 +266,7 @@ impl std::fmt::Display for WorkerError {
         match self {
             Self::Store(error) => write!(formatter, "judge control operation failed: {error}"),
             Self::Application(error) => write!(formatter, "judge execution failed: {error}"),
+            Self::ExecutorTaskFailed => formatter.write_str("judge executor task failed"),
         }
     }
 }

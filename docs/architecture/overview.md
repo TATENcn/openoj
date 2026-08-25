@@ -1,7 +1,7 @@
 ---
 status: Accepted
 owners: OpenOJ maintainers
-last_reviewed: 2026-08-25
+last_reviewed: 2026-08-26
 applies_to: system architecture
 references:
   - workspace-and-crates.md
@@ -49,6 +49,12 @@ Profile 可以约束、扩展或省略阶段，但必须通过能力协商和版
 ## 执行平面
 
 judge node 消费有租约的任务，准备经过验证的 kernel、rootfs、runtime 和 Artifact，管理 jailer/Firecracker、guest 通信、资源计量、watchdog、证据收集和强制回收。
+
+当前单并发 worker 将同步 executor 放入有界 blocking task，按 Judge Control 协商的
+`renew_after` 在执行中周期续租，并在提交前执行最终续租。control-plane 返回取消或续租失败时，
+worker 通过仅能终止当前 Attempt 所属 VMM 的句柄停止 Firecracker，等待 executor teardown 后
+丢弃执行结果；取消不会生成 judge 终态或覆盖 control-plane 已提交终态。该强制路径不依赖
+hung guest 消费协作式消息。
 
 judge node 只接收执行所需的最小数据，不接收控制平面数据库凭证或无关用户权限。guest agent 只实现有限、版本化的命令协议，不提供通用远程 shell。
 

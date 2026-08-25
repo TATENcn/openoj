@@ -16,5 +16,5 @@ pub use config::{
     VsockConfig,
 };
 pub use lifecycle::{Lifecycle, TeardownReason, VmPhase};
-pub use machine::FirecrackerVm;
+pub use machine::{FirecrackerVm, FirecrackerVmCancellation};
 pub use vsock::GuestChannel;

@@ -37,7 +37,7 @@ references:
 | 依赖 | 固定版本 | 用途与 feature | 来源与维护状态 | 许可证 | 替代与移除成本 |
 |---|---:|---|---|---|---|
 | `sqlx` | 0.9.0 | PostgreSQL pool/query/migration；关闭 default features，生产只启用 `postgres`、`runtime-tokio`、`migrate`、`tls-rustls-ring-native-roots`；测试额外启用 `macros` 以创建隔离数据库，不使用在线 query macro | crates.io，launchbadge/sqlx 官方仓库，当前维护；MSRV 1.94 | MIT OR Apache-2.0 | application port 隔离替换面；替换需要重写 adapter、migration 与数据库测试，成本中等 |
-| `tokio` | 1.53.1 | SQLx 已接受运行时；关闭 default features，测试启用 `macros`、`rt-multi-thread`，CLI 按实际 I/O 再增加最小 feature | crates.io，tokio-rs 官方仓库，当前维护；MSRV 1.71 | MIT | 已由技术栈接受；移除会影响数据库和未来进程生命周期，成本高 |
+| `tokio` | 1.53.1 | SQLx 已接受运行时；关闭 default features；judge-core 仅启用 `rt`/`time`，用 blocking task 隔离同步 executor 并按协商周期续租/取消；测试启用 `macros`，CLI 与进程 adapter 按实际 I/O 增加最小 feature | crates.io，tokio-rs 官方仓库，当前维护；MSRV 1.71 | MIT | 已由技术栈接受；移除会影响数据库、worker 取消和进程生命周期，成本高 |
 
 SQLx migration SQL 由 `include_str!` 嵌入，并由 `Migrator::with_migrations` 在运行时计算和校验 checksum，因此 production feature 不需要宏依赖。`Cargo.lock` 仍包含测试宏的传递依赖；它们不进入 `cargo build -p openoj-storage --lib` 的 production feature 图。P0-B 的许可证结论与 P0-A 相同：研究和原型允许继续，正式分发继续被许可证策略未决状态阻塞。
 
