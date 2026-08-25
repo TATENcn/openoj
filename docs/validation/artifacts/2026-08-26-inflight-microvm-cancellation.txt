@@ -1,0 +1,106 @@
+OpenOJ in-flight real-microVM cancellation validation
+Date: 2026-08-26 Asia/Shanghai
+Implementation commit: 89698e67316a13b8a0a1ea45e7592906a3297f29
+
+Environment
+Linux 7.1.8-zen1-3-zen x86_64
+AMD Ryzen 9 9950X3D, 8 visible CPUs, 15 GiB memory, VMware AMD-V
+/dev/kvm crw-rw-rw- root:kvm; KVM API version 12
+Firecracker v1.16.1
+Rust/Cargo 1.97.1
+PostgreSQL 18-alpine image:
+postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+
+Workload and runtime artifacts
+infinite-loop source: 84950edbf9514ebef845181f9f296bf2a71be3032f0d1d27b28b93fe1fd57f54
+stage wall-time budget: 8000 ms
+negotiated lease renewal interval: 250 ms
+reclamation assertion: Firecracker API and vsock paths absent in less than 3000 ms
+kernel: 882fa465c43ab7d92e31bd4167da3ad6a82cb9230f9b0016176df597c6014cef
+rootfs: 4f4121a3f5ea7dc6e34e63f3d704b77f3da30aebb3d7d55f846b13badff3461c
+guest agent: e775d7d0fe71b8980a58ad02b2a9b8ac1195d6b32fc745db659750e46373cae2
+manifest: c89e99d95ed258901bda15d00c9154e956ab1295d3f4043d771394ed5461a23b
+SPDX SBOM: aee7b475b81add5b58f497accdad5d4ef10a5ba8ad06e89007e2427e904ecddb
+manifest checksum file: 3a0e0453a74c917ebb5ff573f69f05e004f509aaad2cd6ae4f8f9732d02917dc
+
+Architecture and safety properties
+- The sync executor runs in spawn_blocking while the worker remains available for periodic lease
+  renewal at the control-plane-negotiated cadence.
+- A cancellation response, stale lease or renewal failure invokes an executor-provided,
+  least-authority cancellation handle and waits for teardown before discarding the result.
+- A final renewal immediately before submit closes the completion-to-submit cancellation race.
+- FirecrackerVmCancellation can only start_kill the exact Firecracker child owned by its Attempt;
+  it is idempotent and covers cancellation before process registration.
+- The guest protocol remains v0alpha1. Existing guest Cancel/Cancelled messages are unchanged and
+  are not used for prompt interruption because the current guest agent cannot consume them while
+  synchronously waiting for a child workload.
+- The judge process survives ordinary cancellation and continues its control loop.
+
+Focused real-KVM cancellation test
+$ OPENOJ_REQUIRE_KVM=1 OPENOJ_TEST_DATABASE_URL=<isolated-postgresql-18> \
+    OPENOJ_FC_TEST_IMAGES=<algorithm-c-runtime-out> \
+    cargo test -p openoj-control-plane --test process_e2e \
+    real_microvm_cancellation_interrupts_and_reclaims \
+    --locked -- --nocapture --test-threads=1
+PASS
+
+Focused real-KVM process matrix
+$ OPENOJ_REQUIRE_KVM=1 OPENOJ_TEST_DATABASE_URL=<isolated-postgresql-18> \
+    OPENOJ_FC_TEST_IMAGES=<algorithm-c-runtime-out> \
+    cargo test -p openoj-control-plane --test process_e2e real_microvm_ \
+    --locked -- --nocapture --test-threads=1
+PASS (4 tests, 17.73 s)
+
+Real-KVM cancellation assertions
+- a real Firecracker process reaches an active API socket for an 8-second infinite-loop request
+- control-plane cancellation persists state=cancelled and terminal_result=true
+- the Attempt-owned Firecracker child is interrupted rather than waiting for the 8-second stage
+  deadline
+- Firecracker API and vsock paths disappear in less than 3 seconds
+- the judge process remains alive after ordinary cancellation
+- CLI status remains responsive and the cancelled terminal cannot be overwritten
+
+Unit and integration coverage
+- Firecracker cancellation kills only its owned child and repeated cancellation is safe
+- blocking execution is interrupted on a control-plane Cancel response
+- blocking execution is interrupted when lease renewal reports a stale lease
+- a final pre-submit renewal fences cancellation that lands after execution completion
+- cancellation before Firecracker child registration is retained and applied after spawn
+
+Workspace gates
+cargo fmt --all -- --check: PASS
+cargo check --workspace --all-targets --locked: PASS
+cargo clippy --workspace --all-targets --locked -- -D warnings: PASS
+DATABASE_URL=<isolated-postgresql-18> OPENOJ_TEST_DATABASE_URL=<same> OPENOJ_REQUIRE_KVM=1 \
+  OPENOJ_FC_TEST_IMAGES=<algorithm-c-runtime-out> \
+  cargo test --workspace --all-targets --locked: PASS (156 tests)
+process_e2e: PASS (9 tests, 12.45 s)
+strict algorithm-c KVM runtime smoke: PASS (1 test, 1.77 s)
+PostgreSQL control-spine: PASS (17 tests, 2.00 s)
+cargo deny --locked check advisories bans sources: PASS (existing duplicate-version warnings only)
+python3 scripts/check-workspace.py: PASS
+bash scripts/check-docs.sh: PASS before adding this record
+change-openoj-architecture, evolve-openoj-protocol, change-openoj-sandbox, develop-openoj and
+verify-openoj quick validators: PASS
+
+Protocol and compatibility
+Host protocol version: v0alpha1 (unchanged)
+Guest protocol version: v0alpha1 (unchanged)
+Canonical schema and generated bindings: unchanged
+Database migrations: unchanged
+
+Unverified boundaries
+- real-KVM interruption caused by lease loss or control UDS disconnect; stale-lease interruption is
+  covered by a deterministic worker unit test
+- reconnect behavior and the exact control UDS disconnect deadline
+- cooperative guest Cancel consumption while a workload is running
+- production jailer, cgroup, seccomp and watchdog profiles
+- CPU, memory, process, disk, I/O, infinite-output and concurrent-guest exhaustion matrix
+- an operator-facing API or CLI cancellation command; this test invokes the existing application
+  and storage cancellation path directly
+- release-build performance and statistically sampled cancellation latency
+
+Cleanup
+No Firecracker process remained after validation. Every per-test database was dropped. The
+task-local PostgreSQL container is removed after documentation validation. Generated runtime
+outputs remain ignored by Git and the pre-existing shared runtime outputs were retained.

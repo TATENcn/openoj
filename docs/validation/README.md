@@ -1,7 +1,7 @@
 ---
 status: Accepted
 owners: OpenOJ maintainers
-last_reviewed: 2026-08-25
+last_reviewed: 2026-08-26
 applies_to: validation evidence
 references:
   - ../requirements/acceptance.md
@@ -37,3 +37,4 @@ references:
 - `2026-08-25-algorithm-c-process-e2e.md`：在真实 KVM 上验证 CLI、PostgreSQL、UDS、judge-node、Firecracker、宿主检查和持久化结果的固定 development Artifact 闭环。
 - `2026-08-25-algorithm-c-process-failures.md`：真实进程闭环持久化 CompileError 与 TimeLimitExceeded，保留失败证据并跳过后续阶段。
 - `2026-08-25-algorithm-c-cancellation-race.md`：真实 microVM workload 期间验证取消终态优先、幂等重放、迟到结果 fencing 与有界最终回收，并明确即时中断仍未实现。
+- `2026-08-26-inflight-microvm-cancellation.md`：真实 microVM workload 期间以 Attempt 级 VMM 句柄即时中断取消执行，验证周期续租、提交前 fencing、3 秒内回收与 judge 存活。
