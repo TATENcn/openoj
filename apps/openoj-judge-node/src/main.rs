@@ -1,12 +1,16 @@
 use std::env;
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
-use openoj_domain::{Capability, ClaimOperationId, NodeId, ResultOperationId};
+use openoj_domain::{Capability, ClaimOperationId, ContentDigest, NodeId, ResultOperationId};
 use openoj_firecracker::{
     FirecrackerConfig, FirecrackerConfigParts, MachineConfig, ResourceLimits, VsockConfig,
 };
 use openoj_judge_core::{Worker, WorkerOutcome};
-use openoj_judge_node::{FirecrackerExecutor, FirecrackerExecutorConfig, UdsJudgeControlClient};
+use openoj_judge_node::{
+    AlgorithmCWorkload, FirecrackerExecutor, FirecrackerExecutorConfig, UdsJudgeControlClient,
+};
 
 #[tokio::main]
 async fn main() {
@@ -68,14 +72,31 @@ fn worker_firecracker(node_id: NodeId) -> Result<Worker<FirecrackerExecutor>, &'
         PathBuf::from(env::var("OPENOJ_FC_VSOCK_SOCKET").map_err(|_| "vsock socket missing")?);
     let production = env::var("OPENOJ_FC_PRODUCTION").as_deref() == Ok("1");
     let jailer_path = env::var("OPENOJ_FC_JAILER").ok().map(PathBuf::from);
+    let source_path = PathBuf::from(
+        env::var("OPENOJ_FC_SOURCE").map_err(|_| "development source artifact missing")?,
+    );
+    let workload = AlgorithmCWorkload::new(
+        read_development_source(&source_path)?,
+        ContentDigest::parse(
+            env::var("OPENOJ_FC_RUNTIME_DIGEST").map_err(|_| "runtime digest missing")?,
+        )
+        .map_err(|_| "runtime digest invalid")?,
+        ContentDigest::parse(
+            env::var("OPENOJ_FC_EXPECTED_OUTPUT_DIGEST")
+                .map_err(|_| "expected output digest missing")?,
+        )
+        .map_err(|_| "expected output digest invalid")?,
+    )
+    .map_err(|_| "development workload invalid")?;
 
     let vm_config = FirecrackerConfig::from_parts(FirecrackerConfigParts {
         kernel_path: kernel,
         kernel_digest: env::var("OPENOJ_FC_KERNEL_DIGEST").map_err(|_| "kernel digest missing")?,
         rootfs_path: rootfs,
         rootfs_digest: env::var("OPENOJ_FC_ROOTFS_DIGEST").map_err(|_| "rootfs digest missing")?,
-        boot_args: "console=ttyS0 reboot=k panic=1 pci=off".to_owned(),
-        machine: MachineConfig::new(1, 128).map_err(|_| "machine config invalid")?,
+        boot_args: "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda ro init=/sbin/openoj-init"
+            .to_owned(),
+        machine: MachineConfig::new(1, 256).map_err(|_| "machine config invalid")?,
         limits: ResourceLimits::default(),
         vsock: VsockConfig::new(3, 8266).map_err(|_| "vsock config invalid")?,
         vsock_uds_path: vsock_socket,
@@ -88,11 +109,41 @@ fn worker_firecracker(node_id: NodeId) -> Result<Worker<FirecrackerExecutor>, &'
         firecracker_path,
         api_socket,
         vm_config,
+        workload,
         production,
     })
     .map_err(|_| "firecracker executor failed to start")?;
 
     Ok(Worker::new(executor))
+}
+
+fn read_development_source(path: &Path) -> Result<Vec<u8>, &'static str> {
+    if !path.is_absolute() {
+        return Err("development source path must be absolute");
+    }
+    let file = File::open(path).map_err(|_| "development source artifact unavailable")?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| "development source artifact unavailable")?;
+    let maximum = openoj_guest_protocol::MAX_INLINE_BYTES;
+    if !metadata.is_file()
+        || metadata.len() == 0
+        || metadata.len() > u64::try_from(maximum).map_err(|_| "source bound invalid")?
+    {
+        return Err("development source artifact invalid");
+    }
+    let mut bytes = Vec::with_capacity(
+        usize::try_from(metadata.len())
+            .map_err(|_| "development source artifact invalid")?
+            .min(maximum),
+    );
+    file.take(u64::try_from(maximum + 1).map_err(|_| "source bound invalid")?)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "development source artifact unavailable")?;
+    if bytes.is_empty() || bytes.len() > maximum {
+        return Err("development source artifact invalid");
+    }
+    Ok(bytes)
 }
 
 fn operation_id_claim() -> Result<ClaimOperationId, &'static str> {

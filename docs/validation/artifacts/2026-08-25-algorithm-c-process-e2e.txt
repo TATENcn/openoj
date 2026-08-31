@@ -1,0 +1,69 @@
+OpenOJ algorithm-c real-microVM process E2E evidence
+Date: 2026-08-25T00:41:44+08:00
+Commit: c492288bcfc25485ca1bead9e9ff4ad31636ff4d
+
+Environment
+-----------
+Linux 7.1.8-zen1-3-zen x86_64 GNU/Linux
+CPU: AMD Ryzen 9 9950X3D 16-Core Processor; 8 visible CPUs; AMD-V
+Hypervisor: VMware
+Memory: 15 GiB; 4 GiB swap
+/dev/kvm: crw-rw-rw- root:kvm major_minor=a:e8; KVM API version 12
+Firecracker: 1.16.1
+PostgreSQL: 18.6, disposable tmpfs container bound to 127.0.0.1:55435
+PostgreSQL image: postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+
+Immutable inputs
+----------------
+C source SHA-256  c2329bffd207edd619d4ca7c7cdd872b76374e1a50421f705020671ca1f85556
+Expected output SHA-256  084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0
+kernel  882fa465c43ab7d92e31bd4167da3ad6a82cb9230f9b0016176df597c6014cef
+rootfs  7a7f28d788d587cf8bb58b3762c714d31472e4057bbb93e3dc0bdcfe5e3d32cd
+guest agent  e775d7d0fe71b8980a58ad02b2a9b8ac1195d6b32fc745db659750e46373cae2
+runtime manifest  c59c795d0205af522050f03608769703ab6d30a7b2db2bbc46b834373a6562a7
+manifest checksum file  a0bec3260495725bf83cd51b8b1c5c8d84b20e93dd5c9500a1415f055f2094a0
+SPDX SBOM  aee7b475b81add5b58f497accdad5d4ef10a5ba8ad06e89007e2427e904ecddb
+Cargo.lock  b07871d606f5066c7e8e3a338455d0ac4596b37a53e6c0c528c084fef5830ad1
+
+RED to GREEN
+------------
+The first strict process E2E timed out after 25.68 seconds without a terminal
+result. The judge-node Firecracker assembly omitted root=/dev/vda, ro and the
+openoj PID 1 init path, and used 128 MiB rather than the validated 256 MiB image
+shape. After aligning the assembly with the strict boot contract, the same test
+passed in 8.21 seconds.
+
+Focused GREEN command
+---------------------
+OPENOJ_TEST_DATABASE_URL=<disposable PostgreSQL 18.6> OPENOJ_REQUIRE_KVM=1 \
+  cargo test -p openoj-control-plane --test process_e2e \
+  postgres_uds_and_judge_node_reach_a_persisted_real_microvm_result \
+  --locked -- --nocapture
+
+The test launched the CLI, control-plane, judge-node and Firecracker as real
+processes. It asserted an Accepted persisted result, Firecracker/non-production
+provenance, node identity, the run evidence digest for "42\n", and API/vsock
+path reclamation.
+
+Workspace gates
+---------------
+OPENOJ_REQUIRE_KVM=1 DATABASE_URL=<disposable PostgreSQL 18.6> \
+  OPENOJ_TEST_DATABASE_URL=<same> cargo test --workspace --all-targets --locked
+Result: 149 passed; 0 failed, including the strict 3-case runtime smoke, the
+real process E2E, 17 PostgreSQL control-spine tests and production fail-closed.
+
+cargo fmt --all -- --check: passed
+cargo check --workspace --all-targets --locked: passed
+cargo clippy --workspace --all-targets --locked -- -D warnings: passed
+cargo deny --locked check advisories bans sources: passed; existing duplicates only
+python3 scripts/check-workspace.py: passed
+bash scripts/check-docs.sh: passed
+algorithm-c runtime structure and four applicable Skill validators: passed
+
+Post-run cleanup found no Firecracker process, process-owned API/vsock path or
+disposable PostgreSQL container. The ignored runtime image output and verified
+offline input cache were intentionally retained.
+
+Not run: object-storage Artifact delivery, HTTP/API ingress, arbitrary user
+artifacts, production isolation, adversarial resource matrix, real-guest
+cancellation races, reproducible rootfs comparison, and release performance.

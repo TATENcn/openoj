@@ -1328,6 +1328,7 @@ dependencies = [
  "openoj-judge-core",
  "openoj-judge-protocol",
  "openoj-protocol",
+ "sha2 0.10.8",
  "tokio",
  "tonic",
 ]

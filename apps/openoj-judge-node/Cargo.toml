@@ -16,6 +16,7 @@ openoj-guest-protocol.workspace = true
 openoj-judge-core.workspace = true
 openoj-judge-protocol.workspace = true
 openoj-protocol.workspace = true
+sha2.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tonic = { workspace = true, features = ["codegen", "transport"] }
 

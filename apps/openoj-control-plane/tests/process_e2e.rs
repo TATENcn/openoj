@@ -1,6 +1,6 @@
 use std::env;
 use std::error::Error;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -8,8 +8,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use openoj_domain::{ExecutorKind, StageKind, Verdict};
+use openoj_protocol::decode_evaluation_result_domain;
+
 const VALID_REQUEST: &str =
     include_str!("../../../schemas/openoj/v0alpha1/fixtures/evaluation-request.valid.json");
+const ALGORITHM_C_SOURCE: &[u8] =
+    b"#include <stdio.h>\nint main(void) { puts(\"42\"); return 0; }\n";
+const ALGORITHM_C_SOURCE_SHA256: &str =
+    "c2329bffd207edd619d4ca7c7cdd872b76374e1a50421f705020671ca1f85556";
+const ALGORITHM_C_OUTPUT_SHA256: &str =
+    "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0";
+const ALGORITHM_C_OUTPUT_CONTENT_DIGEST: &str =
+    "sha256:084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0";
 
 #[test]
 fn postgres_uds_and_two_child_processes_reach_a_terminal_mock_result() -> Result<(), Box<dyn Error>>
@@ -59,6 +70,240 @@ fn postgres_uds_and_two_child_processes_reach_a_terminal_mock_result() -> Result
     control_plane.stop();
     fs::remove_file(socket_path)?;
     Ok(())
+}
+
+#[test]
+fn postgres_uds_and_judge_node_reach_a_persisted_real_microvm_result() -> Result<(), Box<dyn Error>>
+{
+    let Some(images) = load_runtime_images()? else {
+        return unavailable("algorithm-c runtime images are not provisioned");
+    };
+    if !kvm_accessible() {
+        return unavailable("/dev/kvm is absent or not read-write accessible");
+    }
+    let firecracker = firecracker_path();
+    if !firecracker_available(&firecracker) {
+        return unavailable("Firecracker is absent or not executable");
+    }
+
+    let test_db = FreshDatabase::new()?;
+    let database_url = test_db.url().to_owned();
+    let directory = tempfile::tempdir()?;
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))?;
+    let socket_path = directory.path().join("judge-control.sock");
+    let api_socket = directory.path().join("firecracker.sock");
+    let vsock_socket = directory.path().join("vsock.sock");
+    let source_path = directory.path().join("main.c");
+    fs::write(&source_path, ALGORITHM_C_SOURCE)?;
+    let request_path = directory.path().join("request.json");
+    let evaluation_id =
+        unique_firecracker_request(&request_path, &format!("sha256:{}", images.runtime_sha256))?;
+    let root = workspace_root()?;
+
+    let mut control_plane = spawn_real_e2e_control_plane(&database_url, &socket_path)?;
+    wait_for_socket(&socket_path)?;
+
+    let submit = cargo_process(&root, "openoj-cli")
+        .env("OPENOJ_DATABASE_URL", &database_url)
+        .arg("submit")
+        .arg(&request_path)
+        .output()?;
+    if !submit.status.success() {
+        return Err(format!(
+            "CLI submit process failed: {}",
+            String::from_utf8_lossy(&submit.stderr)
+        )
+        .into());
+    }
+
+    let mut judge_node = spawn_real_e2e_judge_node(
+        &root,
+        &socket_path,
+        &api_socket,
+        &vsock_socket,
+        &source_path,
+        &firecracker,
+        &images,
+    )?;
+
+    wait_for_any_terminal_status(&root, &database_url, &evaluation_id)?;
+    let result = persisted_result(&database_url, &evaluation_id)?;
+    assert_eq!(
+        result.verdict(),
+        Verdict::Accepted,
+        "persisted result: {result:?}"
+    );
+    assert_eq!(
+        result.provenance().executor_kind(),
+        ExecutorKind::Firecracker
+    );
+    assert!(!result.provenance().production_eligible());
+    assert_eq!(
+        result
+            .provenance()
+            .node_id()
+            .map(openoj_domain::NodeId::as_str),
+        Some("judge_node_fc_01")
+    );
+    let run = result
+        .stages()
+        .iter()
+        .find(|stage| stage.stage() == StageKind::Run)
+        .ok_or("run stage missing")?;
+    assert_eq!(
+        run.evidence()
+            .first()
+            .and_then(|evidence| evidence.artifact())
+            .map(|artifact| artifact.digest().as_str()),
+        Some(ALGORITHM_C_OUTPUT_CONTENT_DIGEST)
+    );
+
+    judge_node.stop();
+    control_plane.stop();
+    assert!(
+        !api_socket.exists(),
+        "Firecracker API socket was not reclaimed"
+    );
+    assert!(
+        !vsock_socket.exists(),
+        "Firecracker vsock path was not reclaimed"
+    );
+    fs::remove_file(socket_path)?;
+    Ok(())
+}
+
+fn spawn_real_e2e_control_plane(
+    database_url: &str,
+    socket_path: &Path,
+) -> Result<ChildGuard, Box<dyn Error>> {
+    ChildGuard::spawn(
+        Command::new(env!("CARGO_BIN_EXE_openoj-control-plane"))
+            .env("OPENOJ_DATABASE_URL", database_url)
+            .env("OPENOJ_JUDGE_CONTROL_SOCKET", socket_path)
+            .env("OPENOJ_JUDGE_NODES", "judge_node_fc_01:algorithm.batch")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )
+}
+
+fn spawn_real_e2e_judge_node(
+    root: &Path,
+    socket_path: &Path,
+    api_socket: &Path,
+    vsock_socket: &Path,
+    source_path: &Path,
+    firecracker: &Path,
+    images: &RuntimeImages,
+) -> Result<ChildGuard, Box<dyn Error>> {
+    ChildGuard::spawn(
+        cargo_process(root, "openoj-judge-node")
+            .env("OPENOJ_JUDGE_CONTROL_SOCKET", socket_path)
+            .env("OPENOJ_JUDGE_NODE_ID", "judge_node_fc_01")
+            .env("OPENOJ_JUDGE_EXECUTOR", "firecracker")
+            .env("OPENOJ_FC_FIRECRACKER", firecracker)
+            .env("OPENOJ_FC_API_SOCKET", api_socket)
+            .env("OPENOJ_FC_VSOCK_SOCKET", vsock_socket)
+            .env("OPENOJ_FC_KERNEL", &images.kernel)
+            .env(
+                "OPENOJ_FC_KERNEL_DIGEST",
+                format!("sha256:{}", images.kernel_sha256),
+            )
+            .env("OPENOJ_FC_ROOTFS", &images.rootfs)
+            .env(
+                "OPENOJ_FC_ROOTFS_DIGEST",
+                format!("sha256:{}", images.rootfs_sha256),
+            )
+            .env("OPENOJ_FC_SOURCE", source_path)
+            .env(
+                "OPENOJ_FC_RUNTIME_DIGEST",
+                format!("sha256:{}", images.runtime_sha256),
+            )
+            .env(
+                "OPENOJ_FC_EXPECTED_OUTPUT_DIGEST",
+                format!("sha256:{ALGORITHM_C_OUTPUT_SHA256}"),
+            )
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )
+}
+
+struct RuntimeImages {
+    kernel: PathBuf,
+    kernel_sha256: String,
+    rootfs: PathBuf,
+    rootfs_sha256: String,
+    runtime_sha256: String,
+}
+
+fn strict_kvm() -> bool {
+    env::var("OPENOJ_REQUIRE_KVM").as_deref() == Ok("1")
+}
+
+fn unavailable(reason: &str) -> Result<(), Box<dyn Error>> {
+    if strict_kvm() {
+        return Err(format!("strict real-microVM E2E requirement not met: {reason}").into());
+    }
+    println!("skipping real-microVM process E2E: {reason}");
+    Ok(())
+}
+
+fn kvm_accessible() -> bool {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/kvm")
+        .is_ok()
+}
+
+fn firecracker_path() -> PathBuf {
+    env::var_os("OPENOJ_FC_FIRECRACKER").map_or_else(|| PathBuf::from("firecracker"), PathBuf::from)
+}
+
+fn firecracker_available(path: &Path) -> bool {
+    Command::new(path)
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+fn load_runtime_images() -> Result<Option<RuntimeImages>, Box<dyn Error>> {
+    let root = env::var_os("OPENOJ_FC_TEST_IMAGES").map_or_else(
+        || workspace_root().map(|root| root.join("infra/runtime-images/algorithm-c/out")),
+        |path| Ok(PathBuf::from(path)),
+    )?;
+    let kernel = root.join("kernel/vmlinux.bin");
+    let rootfs = root.join("rootfs/rootfs.ext4");
+    let manifest = root.join("manifest.json");
+    let checksums = root.join("manifest.sha256");
+    if !kernel.is_file() || !rootfs.is_file() || !manifest.is_file() || !checksums.is_file() {
+        return Ok(None);
+    }
+    let verified = Command::new("sha256sum")
+        .args(["--check", "--strict", "manifest.sha256"])
+        .current_dir(&root)
+        .output()?;
+    if !verified.status.success() {
+        return Err("runtime image checksum verification failed".into());
+    }
+    Ok(Some(RuntimeImages {
+        kernel_sha256: sha256_file(&kernel)?,
+        rootfs_sha256: sha256_file(&rootfs)?,
+        runtime_sha256: sha256_file(&manifest)?,
+        kernel,
+        rootfs,
+    }))
+}
+
+fn sha256_file(path: &Path) -> Result<String, Box<dyn Error>> {
+    let output = Command::new("sha256sum").arg(path).output()?;
+    if !output.status.success() {
+        return Err("artifact digest calculation failed".into());
+    }
+    String::from_utf8(output.stdout)?
+        .split_whitespace()
+        .next()
+        .map(str::to_owned)
+        .ok_or_else(|| "artifact digest output malformed".into())
 }
 
 /// A judge node whose declared capability is not in its deployment allowlist must
@@ -378,6 +623,35 @@ fn run_psql_url(url: &str, sql: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn persisted_result(
+    url: &str,
+    evaluation_id: &str,
+) -> Result<openoj_domain::EvaluationResult, Box<dyn Error>> {
+    let rest = url.trim_start_matches("postgres://");
+    let (userinfo, hostport_database) = rest.split_once('@').ok_or("invalid connection url")?;
+    let (user, password) = userinfo.split_once(':').ok_or("invalid connection url")?;
+    let (hostport, database) = hostport_database
+        .split_once('/')
+        .ok_or("invalid connection url")?;
+    let (host, port) = hostport.rsplit_once(':').ok_or("invalid connection url")?;
+    let sql = format!(
+        "SELECT convert_from(terminal_result, 'UTF8') FROM evaluations \
+         WHERE evaluation_id = '{evaluation_id}'"
+    );
+    let output = Command::new("psql")
+        .env("PGPASSWORD", password)
+        .args([
+            "-h", host, "-p", port, "-U", user, "-d", database, "-At", "-c", &sql,
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Err(format!("psql failed: {}", String::from_utf8_lossy(&output.stderr)).into());
+    }
+    Ok(decode_evaluation_result_domain(
+        String::from_utf8(output.stdout)?.trim().as_bytes(),
+    )?)
+}
+
 fn unique_request(path: &Path) -> Result<String, Box<dyn Error>> {
     let milliseconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
     let label = format!("p{}_{}", std::process::id(), milliseconds);
@@ -386,6 +660,26 @@ fn unique_request(path: &Path) -> Result<String, Box<dyn Error>> {
         .replace("idem_01", &format!("idem_{label}"))
         .replace("eval_01", &format!("eval_{label}"))
         .replace("attempt_01", &format!("attempt_{label}"));
+    fs::write(path, request)?;
+    Ok(format!("eval_{label}"))
+}
+
+fn unique_firecracker_request(path: &Path, runtime_digest: &str) -> Result<String, Box<dyn Error>> {
+    let milliseconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+    let label = format!("fc{}_{}", std::process::id(), milliseconds);
+    let runtime_hex = runtime_digest
+        .strip_prefix("sha256:")
+        .ok_or("invalid runtime digest")?;
+    let request = VALID_REQUEST
+        .replace("req_01", &format!("req_{label}"))
+        .replace("idem_01", &format!("idem_{label}"))
+        .replace("eval_01", &format!("eval_{label}"))
+        .replace("attempt_01", &format!("attempt_{label}"))
+        .replace(&"2".repeat(64), ALGORITHM_C_SOURCE_SHA256)
+        .replace("text/x-c++src", "text/x-csrc")
+        .replace("\"size_bytes\": 128", "\"size_bytes\": 60")
+        .replace("runtime_cpp_01", "runtime_algorithm_c_v0alpha1")
+        .replace(&"3".repeat(64), runtime_hex);
     fs::write(path, request)?;
     Ok(format!("eval_{label}"))
 }
@@ -436,7 +730,29 @@ fn wait_for_terminal_status(
         }
         thread::sleep(Duration::from_millis(100));
     }
-    Err("judge-node did not produce a terminal development-mock result".into())
+    Err("judge-node did not produce a terminal result".into())
+}
+
+fn wait_for_any_terminal_status(
+    root: &Path,
+    database_url: &str,
+    evaluation_id: &str,
+) -> Result<(), Box<dyn Error>> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        let status = cargo_process(root, "openoj-cli")
+            .env("OPENOJ_DATABASE_URL", database_url)
+            .arg("status")
+            .arg(evaluation_id)
+            .output()?;
+        if status.status.success()
+            && String::from_utf8(status.stdout)?.contains("terminal_result=true")
+        {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    Err("judge-node did not persist a terminal result".into())
 }
 
 fn wait_for_recovered_attempt(

@@ -14,6 +14,7 @@ references:
   - ../development/testing.md
   - ../governance/licensing.md
   - ../validation/2026-08-25-algorithm-c-runtime-kvm.md
+  - ../validation/2026-08-25-algorithm-c-process-e2e.md
 ---
 
 # algorithm-c 开发运行时契约
@@ -27,8 +28,9 @@ Firecracker guest 内经受限 vsock 协议完成上传、编译、运行、宿�
 
 本运行时不得用于公开服务或生产 workload。`OPENOJ_FC_PRODUCTION=1` 必须继续 fail closed；
 缺少独立 uid/gid、jailer、cgroup、namespace、seccomp 与宿主 watchdog 时不得改变该边界。
-真实 KVM 验证只覆盖 `2026-08-25-algorithm-c-runtime-kvm.md` 声明的主机、镜像摘要和
-development smoke；其他环境与 production 约束保持 `Unverified`。
+真实 KVM 验证只覆盖 `2026-08-25-algorithm-c-runtime-kvm.md` 与
+`2026-08-25-algorithm-c-process-e2e.md` 声明的主机、镜像摘要和 development 路径；其他
+环境与 production 约束保持 `Unverified`。
 
 ## 不可变输入与输出
 
@@ -59,9 +61,27 @@ SBOM 自身也必须进入 `manifest.sha256`。摘要或架构不匹配时测试
 - guest 不配置 TAP、网络接口、DNS、平台凭证或对象存储密钥；唯一任务数据通道是有界
   `v0alpha1` vsock 消息。
 - C 编译和运行命令由宿主从固定 executable ID 构造 argv 数组，不接受提交提供的 shell
-  文本。开发 smoke 固定使用 `/usr/bin/cc`、`/work/inputs/main.c` 与 `/work/solution`。
+  文本。development executor 固定使用 `/usr/bin/cc`、`/work/inputs/main.c` 与
+  `/work/main`。
 - 上传、stdout/stderr、诊断、墙钟和 `/work` 容量必须保持有界；guest 输出只能作为宿主
-  checker 的不可信证据，不能自行声明最终 Verdict。
+checker 的不可信证据，不能自行声明最终 Verdict。
+
+## Development 本地 Artifact bridge
+
+正式对象存储接线前，`OPENOJ_JUDGE_EXECUTOR=firecracker` 只允许从受信部署配置提供一个
+本地 C Artifact，不允许 Evaluation 请求携带宿主路径。以下配置均为必填并在进程启动时
+fail closed：
+
+- `OPENOJ_FC_SOURCE`：绝对普通文件路径；启动时最多读取 guest 协议的 256 KiB inline 上限；
+- `OPENOJ_FC_RUNTIME_DIGEST`：当前 `manifest.json` 的 `sha256:` 内容摘要；
+- `OPENOJ_FC_EXPECTED_OUTPUT_DIGEST`：固定测试预期 stdout 的 `sha256:` 摘要；
+- `OPENOJ_FC_KERNEL/ROOTFS` 及各自摘要、Firecracker binary、API/vsock 私有 socket 路径。
+
+每个领取到的请求必须在启动 microVM 前同时匹配源码摘要、精确字节数、`text/x-csrc` 媒体
+类型与 Runtime 摘要；任何不匹配产生失败结果且不得执行源码。匹配后宿主通过既有有界
+`UploadInput` 消息发送 `main.c`，guest 内 build/run；宿主只在 run exit 为零且输出摘要与
+固定预期相等时形成 `Accepted`。该 bridge 不扫描目录、不接受请求提供的命令或路径，也不
+构成生产 Artifact 存储实现。
 
 ## 验证契约
 
@@ -83,6 +103,7 @@ agent readiness 必须让测试失败。
 
 ## 非目标与回退
 
-本切片不实现对象存储正文、CLI/API 到数据库的完整判题闭环、隐藏测试、多语言、production
-jailer/cgroup/seccomp/watchdog、恶意 workload 矩阵或性能结论。回退时删除本地 `out/` 并
-恢复到 hello-image boot 测试；不得回退到宿主直接编译或执行提交。
+本切片不实现对象存储正文、HTTP API、任意用户 Artifact 供应、隐藏测试、多语言、production
+jailer/cgroup/seccomp/watchdog、恶意 workload 矩阵或性能结论。回退时禁用 `firecracker`
+development executor 并恢复到显式 `development_mock` 或只运行 KVM smoke；不得回退到宿主
+直接编译或执行提交。

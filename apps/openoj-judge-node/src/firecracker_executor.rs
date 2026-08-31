@@ -17,18 +17,17 @@ use std::path::PathBuf;
 
 use openoj_application::{ApplicationError, StageContext, StageExecution, StageExecutor};
 use openoj_domain::{
-    Capability, EvaluationRequest, EvaluationResult, ExecutorKind, NodeId, ResourceUsage, StageKind,
+    Capability, ContentDigest, EvaluationRequest, EvaluationResult, ExecutorKind, NodeId,
+    ResourceUsage, StageKind,
 };
 use openoj_evaluator::{execution_for_stage_output, host_check_decision};
 use openoj_firecracker::{FirecrackerConfig, FirecrackerError, FirecrackerVm, GuestChannel};
-use openoj_guest_protocol::Message;
+use openoj_guest_protocol::{MAX_INLINE_BYTES, Message};
 use openoj_judge_core::JudgeExecutor;
+use sha2::{Digest, Sha256};
 
-/// Default build stage wall-clock budget in milliseconds.
-pub const BUILD_WALL_MS: u64 = 30_000;
-
-/// Default run stage wall-clock budget in milliseconds.
-pub const RUN_WALL_MS: u64 = 10_000;
+const ALGORITHM_C_SOURCE_NAME: &str = "main.c";
+const ALGORITHM_C_SOURCE_MEDIA_TYPE: &str = "text/x-csrc";
 
 /// A bounded, guest-facing session used by the executor to run guest stages.
 pub trait GuestSession: Send {
@@ -126,8 +125,84 @@ pub struct FirecrackerExecutorConfig {
     pub api_socket: PathBuf,
     /// Validated microVM configuration.
     pub vm_config: FirecrackerConfig,
+    /// Fixed development artifact and host-side expected output.
+    pub workload: AlgorithmCWorkload,
     /// Whether the production profile is requested.
     pub production: bool,
+}
+
+/// A bounded local-artifact bridge for the development-only algorithm-c slice.
+///
+/// The path used to load these bytes is deployment configuration and never
+/// enters an Evaluation request. Production must replace this bridge with the
+/// content-addressed Artifact store; [`FirecrackerExecutorConfig::validate`]
+/// continues to reject the production profile.
+#[derive(Clone, Debug)]
+pub struct AlgorithmCWorkload {
+    source: Vec<u8>,
+    source_digest: ContentDigest,
+    source_digest_hex: String,
+    runtime_digest: ContentDigest,
+    expected_output_digest: ContentDigest,
+}
+
+impl AlgorithmCWorkload {
+    /// Creates a fixed workload after enforcing the guest inline-input bound.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ApplicationError`] for an empty or oversized source artifact.
+    pub fn new(
+        source: Vec<u8>,
+        runtime_digest: ContentDigest,
+        expected_output_digest: ContentDigest,
+    ) -> Result<Self, ApplicationError> {
+        if source.is_empty() || source.len() > MAX_INLINE_BYTES {
+            return Err(ApplicationError::InvalidExecutorOutput {
+                reason: "development source artifact is empty or oversized",
+            });
+        }
+        let source_digest_hex = sha256_hex(&source);
+        let source_digest = ContentDigest::parse(format!("sha256:{source_digest_hex}"))?;
+        Ok(Self {
+            source,
+            source_digest,
+            source_digest_hex,
+            runtime_digest,
+            expected_output_digest,
+        })
+    }
+
+    fn validate_request(&self, request: &EvaluationRequest) -> Result<(), ApplicationError> {
+        let source = request.submission().source();
+        let size = u64::try_from(self.source.len()).map_err(|_| {
+            ApplicationError::InvalidExecutorOutput {
+                reason: "development source artifact size overflow",
+            }
+        })?;
+        if source.digest() != &self.source_digest
+            || source.size_bytes() != size
+            || source.media_type().as_str() != ALGORITHM_C_SOURCE_MEDIA_TYPE
+        {
+            return Err(ApplicationError::InvalidExecutorOutput {
+                reason: "development source artifact does not match the request",
+            });
+        }
+        if request.runtime().digest() != &self.runtime_digest {
+            return Err(ApplicationError::InvalidExecutorOutput {
+                reason: "configured runtime digest does not match the request",
+            });
+        }
+        Ok(())
+    }
+
+    fn source_digest_hex(&self) -> &str {
+        &self.source_digest_hex
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
 }
 
 impl FirecrackerExecutorConfig {
@@ -154,6 +229,7 @@ pub struct FirecrackerExecutor {
     vm: Option<Box<dyn VmLease>>,
     negotiated: bool,
     last_run_exit: Option<i32>,
+    last_run_output_digest: Option<String>,
     terminated: bool,
 }
 
@@ -171,6 +247,7 @@ impl FirecrackerExecutor {
             vm: None,
             negotiated: false,
             last_run_exit: None,
+            last_run_output_digest: None,
             terminated: false,
         })
     }
@@ -215,7 +292,36 @@ impl FirecrackerExecutor {
         if self.terminated {
             self.negotiated = false;
             self.last_run_exit = None;
+            self.last_run_output_digest = None;
             self.terminated = false;
+        }
+    }
+
+    fn prepare(&mut self, request: &EvaluationRequest) -> Result<StageExecution, ApplicationError> {
+        self.config.workload.validate_request(request)?;
+        self.ensure_session()?;
+        self.ensure_negotiated()?;
+        let session = self
+            .session
+            .as_mut()
+            .ok_or(ApplicationError::UnsupportedCapability)?;
+        session.send(&Message::UploadInput {
+            name: ALGORITHM_C_SOURCE_NAME.to_owned(),
+            digest: self.config.workload.source_digest_hex().to_owned(),
+            bytes: self.config.workload.source.clone(),
+        })?;
+        match session.recv()? {
+            Message::UploadAck { name, accepted }
+                if name == ALGORITHM_C_SOURCE_NAME && accepted =>
+            {
+                Ok(stage_succeeded())
+            }
+            Message::UploadAck { .. } => Err(ApplicationError::InvalidExecutorOutput {
+                reason: "guest rejected the source artifact",
+            }),
+            _ => Err(ApplicationError::InvalidExecutorOutput {
+                reason: "unexpected source upload reply",
+            }),
         }
     }
 
@@ -283,6 +389,7 @@ impl FirecrackerExecutor {
         };
         if stage == StageKind::Run {
             self.last_run_exit = Some(exit_code);
+            self.last_run_output_digest = Some(output_digest.clone());
         }
         execution_for_stage_output(
             stage,
@@ -344,28 +451,31 @@ impl StageExecutor for FirecrackerExecutor {
             return stage_failed();
         }
         let outcome = match context.stage() {
-            StageKind::Prepare | StageKind::Aggregate => Ok(StageExecution::Succeeded {
-                usage: ResourceUsage::default(),
-                diagnostics: Vec::new(),
-                evidence: Vec::new(),
-                decision: None,
-            }),
-            StageKind::Build => {
-                self.run_guest_stage(StageKind::Build, &default_argv("build"), BUILD_WALL_MS)
-            }
-            StageKind::Run => {
-                self.run_guest_stage(StageKind::Run, &default_argv("run"), RUN_WALL_MS)
-            }
-            StageKind::Check => match self.last_run_exit {
-                Some(exit_code) => {
-                    host_check_decision(exit_code).map(|decision| StageExecution::Succeeded {
-                        usage: ResourceUsage::default(),
-                        diagnostics: Vec::new(),
-                        evidence: Vec::new(),
-                        decision: Some(decision),
-                    })
-                }
-                None => Err(ApplicationError::InvalidExecutorOutput {
+            StageKind::Prepare => self.prepare(context.request()),
+            StageKind::Aggregate => Ok(stage_succeeded()),
+            StageKind::Build => self.run_guest_stage(
+                StageKind::Build,
+                &build_argv(),
+                context.request().policy().wall_time_ms(),
+            ),
+            StageKind::Run => self.run_guest_stage(
+                StageKind::Run,
+                &run_argv(),
+                context.request().policy().wall_time_ms(),
+            ),
+            StageKind::Check => match (&self.last_run_exit, &self.last_run_output_digest) {
+                (Some(exit_code), Some(output_digest)) => host_check_decision(
+                    *exit_code,
+                    output_digest,
+                    &self.config.workload.expected_output_digest,
+                )
+                .map(|decision| StageExecution::Succeeded {
+                    usage: ResourceUsage::default(),
+                    diagnostics: Vec::new(),
+                    evidence: Vec::new(),
+                    decision: Some(decision),
+                }),
+                _ => Err(ApplicationError::InvalidExecutorOutput {
                     reason: "check stage before run",
                 }),
             },
@@ -377,9 +487,31 @@ impl StageExecutor for FirecrackerExecutor {
     }
 }
 
-/// A fixed demonstration argv used until artifact storage delivers real commands.
-fn default_argv(_kind: &str) -> Vec<String> {
-    vec!["printf".to_owned(), "ok".to_owned()]
+fn build_argv() -> Vec<String> {
+    [
+        "/usr/bin/cc",
+        "-std=c17",
+        "-O2",
+        "-o",
+        "/work/main",
+        "/work/inputs/main.c",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+fn run_argv() -> Vec<String> {
+    vec!["/work/main".to_owned()]
+}
+
+fn stage_succeeded() -> StageExecution {
+    StageExecution::Succeeded {
+        usage: ResourceUsage::default(),
+        diagnostics: Vec::new(),
+        evidence: Vec::new(),
+        decision: None,
+    }
 }
 
 fn stage_failed() -> StageExecution {
@@ -401,6 +533,9 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const DIGEST: &str = "abababababababababababababababababababababababababababababababab";
+    const SOURCE: &[u8] = b"#include <stdio.h>\nint main(void) { puts(\"42\"); return 0; }\n";
+    const SOURCE_DIGEST: &str = "c2329bffd207edd619d4ca7c7cdd872b76374e1a50421f705020671ca1f85556";
+    const RUNTIME_DIGEST: &str = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
     const VALID_REQUEST: &[u8] =
         include_bytes!("../../../schemas/openoj/v0alpha1/fixtures/evaluation-request.valid.json");
 
@@ -414,6 +549,10 @@ mod tests {
             Self {
                 responses: vec![
                     Message::Negotiated { supported: true },
+                    Message::UploadAck {
+                        name: ALGORITHM_C_SOURCE_NAME.to_owned(),
+                        accepted: true,
+                    },
                     Message::StageOutput {
                         stage: SessionStage::Build,
                         exit_code: 0,
@@ -492,16 +631,53 @@ mod tests {
             firecracker_path: "/usr/bin/firecracker".into(),
             api_socket: "/tmp/fc.sock".into(),
             vm_config: vm_config()?,
+            workload: workload()?,
             production: false,
         })?;
         executor.session = Some(session);
         Ok(executor)
     }
 
+    fn workload() -> Result<AlgorithmCWorkload, Box<dyn std::error::Error>> {
+        Ok(AlgorithmCWorkload::new(
+            SOURCE.to_vec(),
+            ContentDigest::parse(format!("sha256:{RUNTIME_DIGEST}"))?,
+            ContentDigest::parse(format!("sha256:{DIGEST}"))?,
+        )?)
+    }
+
+    fn request() -> Result<EvaluationRequest, Box<dyn std::error::Error>> {
+        let value = String::from_utf8(VALID_REQUEST.to_vec())?
+            .replace(&"2".repeat(64), SOURCE_DIGEST)
+            .replace("text/x-c++src", ALGORITHM_C_SOURCE_MEDIA_TYPE)
+            .replace("\"size_bytes\": 128", "\"size_bytes\": 60")
+            .replace(&"3".repeat(64), RUNTIME_DIGEST);
+        Ok(decode_evaluation_request(value.as_bytes())?)
+    }
+
+    #[test]
+    fn workload_rejects_mismatched_artifact_before_boot() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mismatched = decode_evaluation_request(VALID_REQUEST)?;
+        assert!(workload()?.validate_request(&mismatched).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn workload_rejects_an_oversized_inline_source() -> Result<(), Box<dyn std::error::Error>> {
+        let result = AlgorithmCWorkload::new(
+            vec![b'x'; MAX_INLINE_BYTES + 1],
+            ContentDigest::parse(format!("sha256:{RUNTIME_DIGEST}"))?,
+            ContentDigest::parse(format!("sha256:{DIGEST}"))?,
+        );
+        assert!(result.is_err());
+        Ok(())
+    }
+
     #[test]
     fn firecracker_executor_accepts_successful_roundtrip() -> Result<(), Box<dyn std::error::Error>>
     {
-        let request = decode_evaluation_request(VALID_REQUEST)?;
+        let request = request()?;
         let mut executor = executor_with(Box::new(ScriptedSession::success()))?;
         let result = JudgeExecutor::execute(&mut executor, &request)?;
         assert_eq!(result.verdict(), Verdict::Accepted);
@@ -513,13 +689,14 @@ mod tests {
     #[test]
     fn each_attempt_reclaims_vm_and_keeps_executor_reusable()
     -> Result<(), Box<dyn std::error::Error>> {
-        let request = decode_evaluation_request(VALID_REQUEST)?;
+        let request = request()?;
         let teardowns = Arc::new(AtomicUsize::new(0));
         let mut executor = FirecrackerExecutor::try_new(FirecrackerExecutorConfig {
             node_id: NodeId::parse("judge_fc_01")?,
             firecracker_path: "/usr/bin/firecracker".into(),
             api_socket: "/tmp/fc.sock".into(),
             vm_config: vm_config()?,
+            workload: workload()?,
             production: false,
         })?;
         executor.activate_session(
@@ -557,6 +734,7 @@ mod tests {
             firecracker_path: "/definitely/missing/firecracker".into(),
             api_socket: "/tmp/fc-missing.sock".into(),
             vm_config: vm_config()?,
+            workload: workload()?,
             production: false,
         })?;
 
@@ -577,6 +755,7 @@ mod tests {
             firecracker_path: "/usr/bin/firecracker".into(),
             api_socket: "/tmp/fc.sock".into(),
             vm_config: vm_config()?,
+            workload: workload()?,
             production: true,
         }
         .validate();
@@ -592,6 +771,7 @@ mod tests {
             firecracker_path: "/usr/bin/firecracker".into(),
             api_socket: "/tmp/fc.sock".into(),
             vm_config: vm_config_with_jailer(Some("/usr/bin/jailer".into()))?,
+            workload: workload()?,
             production: true,
         }
         .validate();
