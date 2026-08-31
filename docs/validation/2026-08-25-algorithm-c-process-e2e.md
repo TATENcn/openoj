@@ -17,6 +17,10 @@ references:
 
 # algorithm-c 真实 microVM 进程闭环验证（2026-08-25）
 
+> 后续证据：`2026-08-25-algorithm-c-process-failures.md` 已在真实 CLI/PostgreSQL/UDS/
+> judge-node/Firecracker 链路验证 `CompileError` 与 `TimeLimitExceeded` 的持久化、Evidence、
+> 后续 stage 跳过和资源回收。本记录保留原始 Accepted 闭环证据。
+
 ## 范围与结论
 
 本记录验证 commit `c492288bcfc25485ca1bead9e9ff4ad31636ff4d` 的 development-only

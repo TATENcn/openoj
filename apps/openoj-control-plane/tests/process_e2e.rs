@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use openoj_domain::{ExecutorKind, StageKind, Verdict};
+use openoj_domain::{ExecutorKind, StageKind, StageStatus, Verdict};
 use openoj_protocol::decode_evaluation_result_domain;
 
 const VALID_REQUEST: &str =
@@ -21,6 +21,12 @@ const ALGORITHM_C_OUTPUT_SHA256: &str =
     "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0";
 const ALGORITHM_C_OUTPUT_CONTENT_DIGEST: &str =
     "sha256:084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0";
+const ALGORITHM_C_COMPILE_ERROR_SOURCE: &[u8] = b"int main(void) { this is not C; }\n";
+const ALGORITHM_C_COMPILE_ERROR_SOURCE_SHA256: &str =
+    "45c508a05870369dd65fb951ee804127925b454fa0078ac6e37f84f5a1e3fa06";
+const ALGORITHM_C_TIMEOUT_SOURCE: &[u8] = b"int main(void) { for (;;) {} }\n";
+const ALGORITHM_C_TIMEOUT_SOURCE_SHA256: &str =
+    "84950edbf9514ebef845181f9f296bf2a71be3032f0d1d27b28b93fe1fd57f54";
 
 #[test]
 fn postgres_uds_and_two_child_processes_reach_a_terminal_mock_result() -> Result<(), Box<dyn Error>>
@@ -75,6 +81,43 @@ fn postgres_uds_and_two_child_processes_reach_a_terminal_mock_result() -> Result
 #[test]
 fn postgres_uds_and_judge_node_reach_a_persisted_real_microvm_result() -> Result<(), Box<dyn Error>>
 {
+    run_real_microvm_case(RealMicrovmCase {
+        source: ALGORITHM_C_SOURCE,
+        source_sha256: ALGORITHM_C_SOURCE_SHA256,
+        expected_verdict: Verdict::Accepted,
+        failed_stage: None,
+    })
+}
+
+#[test]
+fn real_microvm_compile_error_is_persisted_and_reclaimed() -> Result<(), Box<dyn Error>> {
+    run_real_microvm_case(RealMicrovmCase {
+        source: ALGORITHM_C_COMPILE_ERROR_SOURCE,
+        source_sha256: ALGORITHM_C_COMPILE_ERROR_SOURCE_SHA256,
+        expected_verdict: Verdict::CompileError,
+        failed_stage: Some(StageKind::Build),
+    })
+}
+
+#[test]
+fn real_microvm_timeout_is_persisted_and_reclaimed() -> Result<(), Box<dyn Error>> {
+    run_real_microvm_case(RealMicrovmCase {
+        source: ALGORITHM_C_TIMEOUT_SOURCE,
+        source_sha256: ALGORITHM_C_TIMEOUT_SOURCE_SHA256,
+        expected_verdict: Verdict::TimeLimitExceeded,
+        failed_stage: Some(StageKind::Run),
+    })
+}
+
+#[derive(Clone, Copy)]
+struct RealMicrovmCase {
+    source: &'static [u8],
+    source_sha256: &'static str,
+    expected_verdict: Verdict,
+    failed_stage: Option<StageKind>,
+}
+
+fn run_real_microvm_case(case: RealMicrovmCase) -> Result<(), Box<dyn Error>> {
     let Some(images) = load_runtime_images()? else {
         return unavailable("algorithm-c runtime images are not provisioned");
     };
@@ -94,10 +137,14 @@ fn postgres_uds_and_judge_node_reach_a_persisted_real_microvm_result() -> Result
     let api_socket = directory.path().join("firecracker.sock");
     let vsock_socket = directory.path().join("vsock.sock");
     let source_path = directory.path().join("main.c");
-    fs::write(&source_path, ALGORITHM_C_SOURCE)?;
+    fs::write(&source_path, case.source)?;
     let request_path = directory.path().join("request.json");
-    let evaluation_id =
-        unique_firecracker_request(&request_path, &format!("sha256:{}", images.runtime_sha256))?;
+    let evaluation_id = unique_firecracker_request(
+        &request_path,
+        &format!("sha256:{}", images.runtime_sha256),
+        case.source_sha256,
+        case.source.len(),
+    )?;
     let root = workspace_root()?;
 
     let mut control_plane = spawn_real_e2e_control_plane(&database_url, &socket_path)?;
@@ -128,9 +175,29 @@ fn postgres_uds_and_judge_node_reach_a_persisted_real_microvm_result() -> Result
 
     wait_for_any_terminal_status(&root, &database_url, &evaluation_id)?;
     let result = persisted_result(&database_url, &evaluation_id)?;
+    assert_real_microvm_result(&result, case)?;
+
+    judge_node.stop();
+    control_plane.stop();
+    assert!(
+        !api_socket.exists(),
+        "Firecracker API socket was not reclaimed"
+    );
+    assert!(
+        !vsock_socket.exists(),
+        "Firecracker vsock path was not reclaimed"
+    );
+    fs::remove_file(socket_path)?;
+    Ok(())
+}
+
+fn assert_real_microvm_result(
+    result: &openoj_domain::EvaluationResult,
+    case: RealMicrovmCase,
+) -> Result<(), Box<dyn Error>> {
     assert_eq!(
         result.verdict(),
-        Verdict::Accepted,
+        case.expected_verdict,
         "persisted result: {result:?}"
     );
     assert_eq!(
@@ -145,30 +212,46 @@ fn postgres_uds_and_judge_node_reach_a_persisted_real_microvm_result() -> Result
             .map(openoj_domain::NodeId::as_str),
         Some("judge_node_fc_01")
     );
-    let run = result
-        .stages()
-        .iter()
-        .find(|stage| stage.stage() == StageKind::Run)
-        .ok_or("run stage missing")?;
-    assert_eq!(
-        run.evidence()
-            .first()
-            .and_then(|evidence| evidence.artifact())
-            .map(|artifact| artifact.digest().as_str()),
-        Some(ALGORITHM_C_OUTPUT_CONTENT_DIGEST)
-    );
-
-    judge_node.stop();
-    control_plane.stop();
-    assert!(
-        !api_socket.exists(),
-        "Firecracker API socket was not reclaimed"
-    );
-    assert!(
-        !vsock_socket.exists(),
-        "Firecracker vsock path was not reclaimed"
-    );
-    fs::remove_file(socket_path)?;
+    if let Some(failed_stage) = case.failed_stage {
+        let failed_index = result
+            .stages()
+            .iter()
+            .position(|stage| stage.stage() == failed_stage)
+            .ok_or("expected failed stage missing")?;
+        let failed = &result.stages()[failed_index];
+        assert_eq!(failed.status(), StageStatus::Failed);
+        assert!(
+            !failed.diagnostics().is_empty(),
+            "failed stage must retain bounded diagnostics"
+        );
+        assert!(
+            failed
+                .evidence()
+                .first()
+                .and_then(|evidence| evidence.artifact())
+                .is_some(),
+            "failed stage must retain content-addressed evidence"
+        );
+        assert!(
+            result.stages()[failed_index + 1..]
+                .iter()
+                .all(|stage| stage.status() == StageStatus::Skipped),
+            "stages after the terminal failure must be skipped"
+        );
+    } else {
+        let run = result
+            .stages()
+            .iter()
+            .find(|stage| stage.stage() == StageKind::Run)
+            .ok_or("run stage missing")?;
+        assert_eq!(
+            run.evidence()
+                .first()
+                .and_then(|evidence| evidence.artifact())
+                .map(|artifact| artifact.digest().as_str()),
+            Some(ALGORITHM_C_OUTPUT_CONTENT_DIGEST)
+        );
+    }
     Ok(())
 }
 
@@ -664,7 +747,12 @@ fn unique_request(path: &Path) -> Result<String, Box<dyn Error>> {
     Ok(format!("eval_{label}"))
 }
 
-fn unique_firecracker_request(path: &Path, runtime_digest: &str) -> Result<String, Box<dyn Error>> {
+fn unique_firecracker_request(
+    path: &Path,
+    runtime_digest: &str,
+    source_sha256: &str,
+    source_size: usize,
+) -> Result<String, Box<dyn Error>> {
     let milliseconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
     let label = format!("fc{}_{}", std::process::id(), milliseconds);
     let runtime_hex = runtime_digest
@@ -675,9 +763,12 @@ fn unique_firecracker_request(path: &Path, runtime_digest: &str) -> Result<Strin
         .replace("idem_01", &format!("idem_{label}"))
         .replace("eval_01", &format!("eval_{label}"))
         .replace("attempt_01", &format!("attempt_{label}"))
-        .replace(&"2".repeat(64), ALGORITHM_C_SOURCE_SHA256)
+        .replace(&"2".repeat(64), source_sha256)
         .replace("text/x-c++src", "text/x-csrc")
-        .replace("\"size_bytes\": 128", "\"size_bytes\": 60")
+        .replace(
+            "\"size_bytes\": 128",
+            &format!("\"size_bytes\": {source_size}"),
+        )
         .replace("runtime_cpp_01", "runtime_algorithm_c_v0alpha1")
         .replace(&"3".repeat(64), runtime_hex);
     fs::write(path, request)?;
