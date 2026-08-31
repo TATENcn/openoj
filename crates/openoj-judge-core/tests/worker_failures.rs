@@ -131,6 +131,10 @@ struct RenewStaleClient {
 }
 
 impl AsyncJudgeControlClient for RenewStaleClient {
+    fn renewal_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(10)
+    }
+
     async fn claim(&mut self, _operation_id: ClaimOperationId) -> Result<WorkerClaim, StoreError> {
         Ok(WorkerClaim::Lease(Box::new(self.lease.clone())))
     }
@@ -157,6 +161,10 @@ struct AsyncNoTaskClient {
 }
 
 impl AsyncJudgeControlClient for AsyncNoTaskClient {
+    fn renewal_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(10)
+    }
+
     async fn claim(&mut self, _operation_id: ClaimOperationId) -> Result<WorkerClaim, StoreError> {
         Ok(WorkerClaim::NoTask)
     }
@@ -183,6 +191,10 @@ struct AsyncSubmitErrorClient {
 }
 
 impl AsyncJudgeControlClient for AsyncSubmitErrorClient {
+    fn renewal_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(10)
+    }
+
     async fn claim(&mut self, _operation_id: ClaimOperationId) -> Result<WorkerClaim, StoreError> {
         Ok(WorkerClaim::Lease(Box::new(self.lease.clone())))
     }

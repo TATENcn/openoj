@@ -46,7 +46,7 @@ async fn run() -> Result<(), &'static str> {
     }
 }
 
-async fn run_loop<E: openoj_judge_core::JudgeExecutor + Send>(
+async fn run_loop<E: openoj_judge_core::JudgeExecutor + Send + 'static>(
     client: &mut UdsJudgeControlClient,
     mut worker: Worker<E>,
 ) -> Result<(), &'static str> {

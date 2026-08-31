@@ -28,6 +28,7 @@ pub struct UdsJudgeControlClient {
     node_id: NodeId,
     capabilities: Vec<Capability>,
     lease_duration: LeaseDuration,
+    renew_after: std::time::Duration,
     no_task_backoff: std::time::Duration,
 }
 
@@ -94,6 +95,7 @@ impl UdsJudgeControlClient {
             node_id,
             capabilities,
             lease_duration,
+            renew_after: std::time::Duration::from_millis(u64::from(response.renew_after_ms)),
             no_task_backoff: std::time::Duration::from_millis(u64::from(
                 response.no_task_backoff_ms,
             )),
@@ -114,6 +116,10 @@ impl UdsJudgeControlClient {
 }
 
 impl AsyncJudgeControlClient for UdsJudgeControlClient {
+    fn renewal_interval(&self) -> std::time::Duration {
+        self.renew_after
+    }
+
     async fn claim(&mut self, operation_id: ClaimOperationId) -> Result<WorkerClaim, StoreError> {
         let response = self
             .client

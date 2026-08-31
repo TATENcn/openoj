@@ -8,10 +8,11 @@ publish = false
 [dependencies]
 openoj-application.workspace = true
 openoj-domain.workspace = true
+tokio = { workspace = true, features = ["rt", "time"] }
 
 [dev-dependencies]
 openoj-protocol.workspace = true
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
 
 [lints]
 workspace = true

@@ -14,6 +14,7 @@
 
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use openoj_application::{ApplicationError, StageContext, StageExecution, StageExecutor};
 use openoj_domain::{
@@ -21,9 +22,11 @@ use openoj_domain::{
     ResourceUsage, StageKind,
 };
 use openoj_evaluator::{execution_for_stage_output, host_check_decision};
-use openoj_firecracker::{FirecrackerConfig, FirecrackerError, FirecrackerVm, GuestChannel};
+use openoj_firecracker::{
+    FirecrackerConfig, FirecrackerError, FirecrackerVm, FirecrackerVmCancellation, GuestChannel,
+};
 use openoj_guest_protocol::{MAX_INLINE_BYTES, Message};
-use openoj_judge_core::JudgeExecutor;
+use openoj_judge_core::{ExecutionCancellation, JudgeExecutor};
 use sha2::{Digest, Sha256};
 
 const ALGORITHM_C_SOURCE_NAME: &str = "main.c";
@@ -104,6 +107,86 @@ trait VmLease: Send {
 
 struct FirecrackerVmLease {
     vm: FirecrackerVm,
+}
+
+#[derive(Default)]
+struct ExecutionControlState {
+    armed: bool,
+    cancelled: bool,
+    vm: Option<FirecrackerVmCancellation>,
+}
+
+#[derive(Default)]
+struct ExecutionControl {
+    state: Mutex<ExecutionControlState>,
+}
+
+impl ExecutionControl {
+    fn arm(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.armed = true;
+            state.cancelled = false;
+            state.vm = None;
+        }
+    }
+
+    fn begin_if_unarmed(&self) -> Result<(), ApplicationError> {
+        let mut state = self.state.lock().map_err(|_| cancellation_error())?;
+        if !state.armed {
+            state.armed = true;
+            state.cancelled = false;
+            state.vm = None;
+        }
+        Ok(())
+    }
+
+    fn register(&self, handle: &FirecrackerVmCancellation) -> Result<(), ApplicationError> {
+        let mut state = self.state.lock().map_err(|_| cancellation_error())?;
+        state.vm = Some(handle.clone());
+        let cancelled = state.cancelled;
+        drop(state);
+        if cancelled {
+            handle.cancel().map_err(map_firecracker)?;
+        }
+        Ok(())
+    }
+
+    fn finish(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.armed = false;
+            state.vm = None;
+        }
+    }
+
+    fn cancel(&self) -> Result<(), ApplicationError> {
+        let mut state = self.state.lock().map_err(|_| cancellation_error())?;
+        if !state.armed {
+            return Ok(());
+        }
+        state.cancelled = true;
+        let handle = state.vm.clone();
+        drop(state);
+        if let Some(handle) = handle {
+            handle.cancel().map_err(map_firecracker)?;
+        }
+        Ok(())
+    }
+}
+
+fn cancellation_error() -> ApplicationError {
+    ApplicationError::InvalidExecutorOutput {
+        reason: "execution cancellation unavailable",
+    }
+}
+
+struct FirecrackerExecutionCancellation {
+    control: Arc<ExecutionControl>,
+}
+
+impl ExecutionCancellation for FirecrackerExecutionCancellation {
+    fn cancel(&self) -> Result<(), ApplicationError> {
+        self.control.cancel()
+    }
 }
 
 impl VmLease for FirecrackerVmLease {
@@ -231,6 +314,7 @@ pub struct FirecrackerExecutor {
     last_run_exit: Option<i32>,
     last_run_output_digest: Option<String>,
     terminated: bool,
+    control: Arc<ExecutionControl>,
 }
 
 impl FirecrackerExecutor {
@@ -249,6 +333,7 @@ impl FirecrackerExecutor {
             last_run_exit: None,
             last_run_output_digest: None,
             terminated: false,
+            control: Arc::new(ExecutionControl::default()),
         })
     }
 
@@ -261,6 +346,7 @@ impl FirecrackerExecutor {
             self.config.firecracker_path.clone(),
             self.config.api_socket.clone(),
         );
+        self.control.register(&vm.cancellation_handle())?;
         if !matches!(
             block_on_vmm(vm.bootstrap(self.config.production)),
             Ok(Ok(()))
@@ -288,13 +374,15 @@ impl FirecrackerExecutor {
         self.session = Some(session);
     }
 
-    fn begin_attempt(&mut self) {
+    fn begin_attempt(&mut self) -> Result<(), ApplicationError> {
+        self.control.begin_if_unarmed()?;
         if self.terminated {
             self.negotiated = false;
             self.last_run_exit = None;
             self.last_run_output_digest = None;
             self.terminated = false;
         }
+        Ok(())
     }
 
     fn prepare(&mut self, request: &EvaluationRequest) -> Result<StageExecution, ApplicationError> {
@@ -408,6 +496,7 @@ impl FirecrackerExecutor {
             let _ = vm.terminate();
         }
         self.terminated = true;
+        self.control.finish();
     }
 }
 
@@ -422,10 +511,17 @@ impl JudgeExecutor for FirecrackerExecutor {
         &mut self,
         request: &EvaluationRequest,
     ) -> Result<EvaluationResult, ApplicationError> {
-        self.begin_attempt();
+        self.begin_attempt()?;
         let result = openoj_application::evaluate(request, self);
         self.teardown();
         result
+    }
+
+    fn cancellation_handle(&self) -> Box<dyn ExecutionCancellation> {
+        self.control.arm();
+        Box::new(FirecrackerExecutionCancellation {
+            control: Arc::clone(&self.control),
+        })
     }
 }
 

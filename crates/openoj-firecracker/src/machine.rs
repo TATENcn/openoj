@@ -7,6 +7,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::process::{Child, Command};
@@ -32,7 +34,36 @@ pub struct FirecrackerVm {
     lifecycle: Lifecycle,
     firecracker_path: PathBuf,
     api_socket: PathBuf,
-    child: Option<Child>,
+    child: Arc<Mutex<Option<Child>>>,
+    cancellation_requested: Arc<AtomicBool>,
+}
+
+/// Least-authority handle that can only request termination of one owned VMM process.
+#[derive(Clone)]
+pub struct FirecrackerVmCancellation {
+    child: Arc<Mutex<Option<Child>>>,
+    requested: Arc<AtomicBool>,
+}
+
+impl FirecrackerVmCancellation {
+    /// Requests immediate VMM termination. Safe before spawn and idempotent after exit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FirecrackerError`] if process ownership is unavailable or termination cannot be
+    /// requested.
+    pub fn cancel(&self) -> Result<(), FirecrackerError> {
+        self.requested.store(true, Ordering::Release);
+        let mut child = self.child.lock().map_err(|_| FirecrackerError::Io {
+            message: "firecracker child ownership unavailable".to_owned(),
+        })?;
+        if let Some(child) = child.as_mut() {
+            child.start_kill().map_err(|error| FirecrackerError::Io {
+                message: format!("terminate firecracker failed: {error}"),
+            })?;
+        }
+        Ok(())
+    }
 }
 
 impl FirecrackerVm {
@@ -48,7 +79,17 @@ impl FirecrackerVm {
             lifecycle: Lifecycle::new(),
             firecracker_path: firecracker_path.as_ref().to_path_buf(),
             api_socket: api_socket.as_ref().to_path_buf(),
-            child: None,
+            child: Arc::new(Mutex::new(None)),
+            cancellation_requested: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Returns a handle that can terminate only this VM's owned process.
+    #[must_use]
+    pub fn cancellation_handle(&self) -> FirecrackerVmCancellation {
+        FirecrackerVmCancellation {
+            child: Arc::clone(&self.child),
+            requested: Arc::clone(&self.cancellation_requested),
         }
     }
 
@@ -101,7 +142,17 @@ impl FirecrackerVm {
             Some(jailer_path) => self.spawn_jailer(&jailer_path)?,
             None => self.spawn_direct()?,
         };
-        self.child = Some(child);
+        let mut owned = self.child.lock().map_err(|_| FirecrackerError::Io {
+            message: "firecracker child ownership unavailable".to_owned(),
+        })?;
+        *owned = Some(child);
+        if self.cancellation_requested.load(Ordering::Acquire)
+            && let Some(child) = owned.as_mut()
+        {
+            child.start_kill().map_err(|error| FirecrackerError::Io {
+                message: format!("terminate firecracker failed: {error}"),
+            })?;
+        }
         Ok(())
     }
 
@@ -180,7 +231,10 @@ impl FirecrackerVm {
     }
 
     fn child_finished(&mut self) -> bool {
-        match self.child.as_mut() {
+        let Ok(mut child) = self.child.lock() else {
+            return true;
+        };
+        match child.as_mut() {
             Some(child) => child.try_wait().ok().flatten().is_some(),
             None => true,
         }
@@ -309,7 +363,14 @@ impl FirecrackerVm {
             .map_err(|phase| FirecrackerError::Io {
                 message: format!("cannot tear down from {phase}"),
             })?;
-        if let Some(mut child) = self.child.take() {
+        let child = self
+            .child
+            .lock()
+            .map_err(|_| FirecrackerError::Io {
+                message: "firecracker child ownership unavailable".to_owned(),
+            })?
+            .take();
+        if let Some(mut child) = child {
             let _ = child.kill().await;
             let _ = child.wait().await;
         }
@@ -324,7 +385,9 @@ impl Drop for FirecrackerVm {
     fn drop(&mut self) {
         // Best-effort synchronous teardown if not already reclaimed.
         if self.lifecycle.phase().needs_teardown() {
-            if let Some(mut child) = self.child.take() {
+            if let Ok(mut owned) = self.child.lock()
+                && let Some(mut child) = owned.take()
+            {
                 let _ = child.start_kill();
             }
             let _ = std::fs::remove_file(&self.api_socket);
@@ -410,19 +473,49 @@ mod tests {
             "/usr/bin/firecracker",
             "/tmp/fc-failed.sock",
         );
-        vm.child = Some(child);
+        *vm.child
+            .lock()
+            .map_err(|_| "firecracker child ownership unavailable")? = Some(child);
         vm.lifecycle.fail_with(TeardownReason::ControlApi);
 
         let result = vm.terminate().await;
-        if result.is_err()
-            && let Some(mut child) = vm.child.take()
-        {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+        if result.is_err() {
+            let child = vm
+                .child
+                .lock()
+                .map_err(|_| "firecracker child ownership unavailable")?
+                .take();
+            if let Some(mut child) = child {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+            }
         }
 
         assert!(result.is_ok(), "failed VM must remain reclaimable");
         assert_eq!(vm.phase(), VmPhase::Terminated);
+        assert!(!Path::new(&format!("/proc/{child_id}")).exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cancellation_handle_kills_only_the_owned_child()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let child = Command::new("/usr/bin/sleep").arg("30").spawn()?;
+        let child_id = child.id().ok_or("spawned child has no process id")?;
+        let mut vm = FirecrackerVm::new(
+            fixture_config()?,
+            "/usr/bin/firecracker",
+            "/tmp/fc-cancel.sock",
+        );
+        *vm.child
+            .lock()
+            .map_err(|_| "firecracker child ownership unavailable")? = Some(child);
+        let cancellation = vm.cancellation_handle();
+
+        cancellation.cancel()?;
+        cancellation.cancel()?;
+        vm.terminate().await?;
+
         assert!(!Path::new(&format!("/proc/{child_id}")).exists());
         Ok(())
     }
