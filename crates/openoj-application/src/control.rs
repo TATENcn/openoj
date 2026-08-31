@@ -216,7 +216,6 @@ pub struct SubmitResult {
 pub struct CancelEvaluation {
     pub idempotency_key: IdempotencyKey,
     pub evaluation_id: EvaluationId,
-    pub result: EvaluationResult,
     pub now: UnixMillis,
 }
 

@@ -10,7 +10,7 @@ use openoj_storage::PostgresEvaluationStore;
 use sqlx::PgPool;
 
 #[test]
-fn parser_accepts_only_the_three_bounded_commands() {
+fn parser_accepts_only_the_four_bounded_commands() {
     assert_eq!(parse_args(["migrate"]), Ok(CliCommand::Migrate));
     assert!(matches!(
         parse_args(["submit", "request.json"]),
@@ -20,8 +20,17 @@ fn parser_accepts_only_the_three_bounded_commands() {
         parse_args(["status", "eval_01"]),
         Ok(CliCommand::Status { .. })
     ));
+    assert!(matches!(
+        parse_args(["cancel", "eval_01", "cancel_01"]),
+        Ok(CliCommand::Cancel { .. })
+    ));
     assert_eq!(parse_args(["submit"]), Err(CliError::Usage));
     assert_eq!(parse_args(["migrate", "unexpected"]), Err(CliError::Usage));
+    assert_eq!(parse_args(["cancel", "eval_01"]), Err(CliError::Usage));
+    assert_eq!(
+        parse_args(["cancel", "eval_01", "-bad"]),
+        Err(CliError::InvalidIdempotencyKey)
+    );
     assert!(matches!(
         parse_args(["status", "-bad"]),
         Err(CliError::InvalidEvaluationId)
@@ -66,7 +75,7 @@ fn bounded_reader_rejects_oversized_input_before_decode() -> Result<(), Box<dyn 
 }
 
 #[sqlx::test(migrations = false)]
-async fn migrate_submit_replay_and_status_use_the_durable_store(
+async fn migrate_submit_cancel_replay_and_status_use_the_durable_store(
     pool: PgPool,
 ) -> Result<(), Box<dyn Error>> {
     let store = PostgresEvaluationStore::from_pool(pool.clone());
@@ -100,16 +109,53 @@ async fn migrate_submit_replay_and_status_use_the_durable_store(
     .await?;
     assert_eq!(first, expected);
     assert_eq!(replay, expected);
+    let cancelled = "evaluation=eval_01 attempt=attempt_01 attempt_number=1 state=cancelled terminal_result=true";
+    assert_eq!(
+        execute_with_store(
+            CliCommand::Cancel {
+                evaluation_id: openoj_domain::EvaluationId::parse("eval_01")?,
+                idempotency_key: openoj_domain::IdempotencyKey::parse("cancel_cli_01")?,
+            },
+            store.clone(),
+            UnixMillis::new(12_003)?,
+        )
+        .await?,
+        cancelled
+    );
+    assert_eq!(
+        execute_with_store(
+            CliCommand::Cancel {
+                evaluation_id: openoj_domain::EvaluationId::parse("eval_01")?,
+                idempotency_key: openoj_domain::IdempotencyKey::parse("cancel_cli_01")?,
+            },
+            store.clone(),
+            UnixMillis::new(12_004)?,
+        )
+        .await?,
+        cancelled
+    );
     assert_eq!(
         execute_with_store(
             CliCommand::Status {
                 evaluation_id: openoj_domain::EvaluationId::parse("eval_01")?,
             },
-            store,
-            UnixMillis::new(12_003)?,
+            store.clone(),
+            UnixMillis::new(12_005)?,
         )
         .await?,
-        expected
+        cancelled
+    );
+    assert_eq!(
+        execute_with_store(
+            CliCommand::Cancel {
+                evaluation_id: openoj_domain::EvaluationId::parse("eval_01")?,
+                idempotency_key: openoj_domain::IdempotencyKey::parse("different_cancel")?,
+            },
+            store,
+            UnixMillis::new(12_006)?,
+        )
+        .await,
+        Err(CliError::Storage)
     );
     fs::remove_file(std::env::temp_dir().join(format!(
         "openoj-cli-submit-{}-{}.json",

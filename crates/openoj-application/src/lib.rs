@@ -176,6 +176,49 @@ pub fn evaluate<E: StageExecutor>(
     run.finish_success()
 }
 
+/// Builds the canonical terminal result for a control-plane cancellation request.
+///
+/// This result deliberately uses non-production development provenance with no judge node: the
+/// control plane records an operator decision and must not fabricate evidence that a guest stage
+/// produced the cancellation.
+///
+/// # Errors
+///
+/// Returns [`ApplicationError`] when the request cannot produce a valid canonical result.
+pub fn cancellation_result(
+    request: &EvaluationRequest,
+) -> Result<EvaluationResult, ApplicationError> {
+    evaluate(request, &mut ControlPlaneCancellation)
+}
+
+struct ControlPlaneCancellation;
+
+impl StageExecutor for ControlPlaneCancellation {
+    fn kind(&self) -> ExecutorKind {
+        ExecutorKind::DevelopmentMock
+    }
+
+    fn production_eligible(&self) -> bool {
+        false
+    }
+
+    fn node_id(&self) -> Option<NodeId> {
+        None
+    }
+
+    fn supports(&self, _capability: &Capability) -> bool {
+        true
+    }
+
+    fn execute(&mut self, _context: StageContext<'_>) -> StageExecution {
+        StageExecution::Cancelled {
+            usage: ResourceUsage::default(),
+            diagnostics: Vec::new(),
+            evidence: Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Terminal {
     status: EvaluationStatus,
@@ -411,7 +454,9 @@ mod tests {
         StageKind, StageStatus, SubmissionId, SubmissionRef, Verdict,
     };
 
-    use super::{Decision, StageContext, StageExecution, StageExecutor, evaluate};
+    use super::{
+        Decision, StageContext, StageExecution, StageExecutor, cancellation_result, evaluate,
+    };
 
     #[derive(Clone, Copy)]
     enum TerminalMode {
@@ -529,6 +574,29 @@ mod tests {
         assert_eq!(cancelled.verdict(), Verdict::Cancelled);
         assert_eq!(failed.status(), EvaluationStatus::Failed);
         assert_eq!(failed.verdict(), Verdict::SystemError);
+        Ok(())
+    }
+
+    #[test]
+    fn control_plane_cancellation_has_canonical_non_execution_provenance()
+    -> Result<(), Box<dyn Error>> {
+        let request = request()?;
+        let cancelled = cancellation_result(&request)?;
+
+        assert_eq!(cancelled.status(), EvaluationStatus::Cancelled);
+        assert_eq!(cancelled.verdict(), Verdict::Cancelled);
+        assert_eq!(
+            cancelled.provenance().executor_kind(),
+            ExecutorKind::DevelopmentMock
+        );
+        assert!(!cancelled.provenance().production_eligible());
+        assert!(cancelled.provenance().node_id().is_none());
+        assert_eq!(cancelled.stages()[0].status(), StageStatus::Cancelled);
+        assert!(
+            cancelled.stages()[1..]
+                .iter()
+                .all(|stage| stage.status() == StageStatus::Skipped)
+        );
         Ok(())
     }
 

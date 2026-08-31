@@ -6,16 +6,24 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use openoj_application::{ControlPlane, CreateEvaluation, EvaluationSnapshot};
-use openoj_domain::{EvaluationId, UnixMillis};
+use openoj_application::{CancelEvaluation, ControlPlane, CreateEvaluation, EvaluationSnapshot};
+use openoj_domain::{EvaluationId, IdempotencyKey, UnixMillis};
 use openoj_protocol::{MAX_EVALUATION_REQUEST_BYTES, decode_evaluation_request};
 use openoj_storage::{DatabasePoolSize, PostgresEvaluationStore, SUPPORTED_SCHEMA_VERSION};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CliCommand {
     Migrate,
-    Submit { path: PathBuf },
-    Status { evaluation_id: EvaluationId },
+    Submit {
+        path: PathBuf,
+    },
+    Status {
+        evaluation_id: EvaluationId,
+    },
+    Cancel {
+        evaluation_id: EvaluationId,
+        idempotency_key: IdempotencyKey,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,6 +31,7 @@ pub enum CliCommand {
 pub enum CliError {
     Usage,
     InvalidEvaluationId,
+    InvalidIdempotencyKey,
     InputTooLarge,
     Io,
     MissingDatabaseUrl,
@@ -36,9 +45,10 @@ impl Display for CliError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Usage => {
-                "usage: openoj-cli migrate | submit <request.json> | status <evaluation-id>"
+                "usage: openoj-cli migrate | submit <request.json> | status <evaluation-id> | cancel <evaluation-id> <idempotency-key>"
             }
             Self::InvalidEvaluationId => "evaluation ID is invalid",
+            Self::InvalidIdempotencyKey => "idempotency key is invalid",
             Self::InputTooLarge => "input exceeds the evaluation request byte limit",
             Self::Io => "input could not be read",
             Self::MissingDatabaseUrl => "OPENOJ_DATABASE_URL is required",
@@ -70,7 +80,7 @@ pub fn parse_database_pool_size(value: Option<&str>) -> Result<DatabasePoolSize,
 /// # Errors
 ///
 /// Returns [`CliError::Usage`] for unknown or incorrectly sized commands and
-/// [`CliError::InvalidEvaluationId`] for a malformed status target.
+/// typed identifier errors for malformed status or cancellation arguments.
 pub fn parse_args<I, S>(arguments: I) -> Result<CliCommand, CliError>
 where
     I: IntoIterator<Item = S>,
@@ -105,6 +115,27 @@ where
             Ok(CliCommand::Status {
                 evaluation_id: EvaluationId::parse(value)
                     .map_err(|_| CliError::InvalidEvaluationId)?,
+            })
+        }
+        "cancel" => {
+            let evaluation_id = arguments
+                .next()
+                .ok_or(CliError::Usage)?
+                .into_string()
+                .map_err(|_| CliError::InvalidEvaluationId)?;
+            let idempotency_key = arguments
+                .next()
+                .ok_or(CliError::Usage)?
+                .into_string()
+                .map_err(|_| CliError::InvalidIdempotencyKey)?;
+            if arguments.next().is_some() {
+                return Err(CliError::Usage);
+            }
+            Ok(CliCommand::Cancel {
+                evaluation_id: EvaluationId::parse(evaluation_id)
+                    .map_err(|_| CliError::InvalidEvaluationId)?,
+                idempotency_key: IdempotencyKey::parse(idempotency_key)
+                    .map_err(|_| CliError::InvalidIdempotencyKey)?,
             })
         }
         _ => Err(CliError::Usage),
@@ -176,6 +207,24 @@ pub async fn execute_with_store(
                 .map_err(|_| CliError::Storage)?;
             let snapshot = ControlPlane::new(store)
                 .evaluation_status(evaluation_id)
+                .await
+                .map_err(|_| CliError::Storage)?;
+            Ok(format_snapshot(&snapshot))
+        }
+        CliCommand::Cancel {
+            evaluation_id,
+            idempotency_key,
+        } => {
+            store
+                .check_compatibility()
+                .await
+                .map_err(|_| CliError::Storage)?;
+            let snapshot = ControlPlane::new(store)
+                .cancel_evaluation(CancelEvaluation {
+                    idempotency_key,
+                    evaluation_id,
+                    now,
+                })
                 .await
                 .map_err(|_| CliError::Storage)?;
             Ok(format_snapshot(&snapshot))

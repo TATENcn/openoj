@@ -197,7 +197,6 @@ fn control_plane_delegates_each_typed_command() -> Result<(), Box<dyn Error>> {
         block_on(control.cancel_evaluation(CancelEvaluation {
             idempotency_key: result_key,
             evaluation_id: request.evaluation_id().clone(),
-            result,
             now,
         }))?,
         snapshot
