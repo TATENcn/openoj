@@ -36,3 +36,4 @@ references:
 - `2026-08-25-algorithm-c-runtime-kvm.md`：修复 guest 文件系统启动后，在真实 KVM 上验证 C 编译运行、编译失败、运行超时与幂等回收。
 - `2026-08-25-algorithm-c-process-e2e.md`：在真实 KVM 上验证 CLI、PostgreSQL、UDS、judge-node、Firecracker、宿主检查和持久化结果的固定 development Artifact 闭环。
 - `2026-08-25-algorithm-c-process-failures.md`：真实进程闭环持久化 CompileError 与 TimeLimitExceeded，保留失败证据并跳过后续阶段。
+- `2026-08-25-algorithm-c-cancellation-race.md`：真实 microVM workload 期间验证取消终态优先、幂等重放、迟到结果 fencing 与有界最终回收，并明确即时中断仍未实现。

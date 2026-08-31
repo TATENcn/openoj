@@ -3,13 +3,20 @@ use std::error::Error;
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use openoj_domain::{ExecutorKind, StageKind, StageStatus, Verdict};
-use openoj_protocol::decode_evaluation_result_domain;
+use openoj_application::{
+    CancelEvaluation, ControlPlane, StageContext, StageExecution, StageExecutor,
+};
+use openoj_domain::{
+    AttemptState, Capability, EvaluationState, ExecutorKind, IdempotencyKey, NodeId, ResourceUsage,
+    StageKind, StageStatus, UnixMillis, Verdict,
+};
+use openoj_protocol::{decode_evaluation_request, decode_evaluation_result_domain};
+use openoj_storage::{DatabasePoolSize, PostgresEvaluationStore};
 
 const VALID_REQUEST: &str =
     include_str!("../../../schemas/openoj/v0alpha1/fixtures/evaluation-request.valid.json");
@@ -86,6 +93,7 @@ fn postgres_uds_and_judge_node_reach_a_persisted_real_microvm_result() -> Result
         source_sha256: ALGORITHM_C_SOURCE_SHA256,
         expected_verdict: Verdict::Accepted,
         failed_stage: None,
+        wall_time_ms: 2_000,
     })
 }
 
@@ -96,6 +104,7 @@ fn real_microvm_compile_error_is_persisted_and_reclaimed() -> Result<(), Box<dyn
         source_sha256: ALGORITHM_C_COMPILE_ERROR_SOURCE_SHA256,
         expected_verdict: Verdict::CompileError,
         failed_stage: Some(StageKind::Build),
+        wall_time_ms: 2_000,
     })
 }
 
@@ -106,7 +115,99 @@ fn real_microvm_timeout_is_persisted_and_reclaimed() -> Result<(), Box<dyn Error
         source_sha256: ALGORITHM_C_TIMEOUT_SOURCE_SHA256,
         expected_verdict: Verdict::TimeLimitExceeded,
         failed_stage: Some(StageKind::Run),
+        wall_time_ms: 2_000,
     })
+}
+
+#[test]
+fn real_microvm_cancellation_wins_late_result_and_reclaims() -> Result<(), Box<dyn Error>> {
+    let Some(images) = load_runtime_images()? else {
+        return unavailable("algorithm-c runtime images are not provisioned");
+    };
+    if !kvm_accessible() {
+        return unavailable("/dev/kvm is absent or not read-write accessible");
+    }
+    let firecracker = firecracker_path();
+    if !firecracker_available(&firecracker) {
+        return unavailable("Firecracker is absent or not executable");
+    }
+
+    let test_db = FreshDatabase::new()?;
+    let database_url = test_db.url().to_owned();
+    let directory = tempfile::tempdir()?;
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))?;
+    let socket_path = directory.path().join("judge-control.sock");
+    let api_socket = directory.path().join("firecracker.sock");
+    let vsock_socket = directory.path().join("vsock.sock");
+    let source_path = directory.path().join("main.c");
+    fs::write(&source_path, ALGORITHM_C_TIMEOUT_SOURCE)?;
+    let request_path = directory.path().join("request.json");
+    let evaluation_id = unique_firecracker_request(
+        &request_path,
+        &format!("sha256:{}", images.runtime_sha256),
+        ALGORITHM_C_TIMEOUT_SOURCE_SHA256,
+        ALGORITHM_C_TIMEOUT_SOURCE.len(),
+        8_000,
+    )?;
+    let request = decode_evaluation_request(&fs::read(&request_path)?)?;
+    let root = workspace_root()?;
+
+    let mut control_plane = spawn_real_e2e_control_plane(&database_url, &socket_path)?;
+    wait_for_socket(&socket_path)?;
+    submit_request(&root, &database_url, &request_path)?;
+    let mut judge_node = spawn_real_e2e_judge_node(
+        &root,
+        &socket_path,
+        &api_socket,
+        &vsock_socket,
+        &source_path,
+        &firecracker,
+        &images,
+    )?;
+
+    wait_for_path(&api_socket, "Firecracker API socket")?;
+    thread::sleep(Duration::from_secs(2));
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    let store = runtime.block_on(PostgresEvaluationStore::connect(
+        &database_url,
+        DatabasePoolSize::new(4).ok_or("invalid test database pool size")?,
+    ))?;
+    let control = ControlPlane::new(store);
+    let mut cancellation_executor = CancellationResultExecutor;
+    let result = openoj_application::evaluate(&request, &mut cancellation_executor)?;
+    let command = CancelEvaluation {
+        idempotency_key: IdempotencyKey::parse("cancel_real_microvm_run")?,
+        evaluation_id: request.evaluation_id().clone(),
+        result,
+        now: current_unix_millis()?,
+    };
+    let cancelled = runtime.block_on(control.cancel_evaluation(command.clone()))?;
+    let replayed = runtime.block_on(control.cancel_evaluation(command))?;
+    assert_eq!(cancelled, replayed);
+    assert_eq!(cancelled.state, EvaluationState::Cancelled);
+    assert_eq!(cancelled.attempt_state, AttemptState::Cancelled);
+
+    let node_status = judge_node.wait_for_exit(Duration::from_secs(15))?;
+    assert!(
+        !node_status.success(),
+        "judge node must reject its late result after cancellation"
+    );
+    assert_cancelled_status(&root, &database_url, &evaluation_id)?;
+    let persisted = persisted_result(&database_url, &evaluation_id)?;
+    assert_cancelled_microvm_result(&persisted)?;
+
+    control_plane.stop();
+    assert!(
+        !api_socket.exists(),
+        "Firecracker API socket was not reclaimed"
+    );
+    assert!(
+        !vsock_socket.exists(),
+        "Firecracker vsock path was not reclaimed"
+    );
+    fs::remove_file(socket_path)?;
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -115,6 +216,7 @@ struct RealMicrovmCase {
     source_sha256: &'static str,
     expected_verdict: Verdict,
     failed_stage: Option<StageKind>,
+    wall_time_ms: u64,
 }
 
 fn run_real_microvm_case(case: RealMicrovmCase) -> Result<(), Box<dyn Error>> {
@@ -144,24 +246,14 @@ fn run_real_microvm_case(case: RealMicrovmCase) -> Result<(), Box<dyn Error>> {
         &format!("sha256:{}", images.runtime_sha256),
         case.source_sha256,
         case.source.len(),
+        case.wall_time_ms,
     )?;
     let root = workspace_root()?;
 
     let mut control_plane = spawn_real_e2e_control_plane(&database_url, &socket_path)?;
     wait_for_socket(&socket_path)?;
 
-    let submit = cargo_process(&root, "openoj-cli")
-        .env("OPENOJ_DATABASE_URL", &database_url)
-        .arg("submit")
-        .arg(&request_path)
-        .output()?;
-    if !submit.status.success() {
-        return Err(format!(
-            "CLI submit process failed: {}",
-            String::from_utf8_lossy(&submit.stderr)
-        )
-        .into());
-    }
+    submit_request(&root, &database_url, &request_path)?;
 
     let mut judge_node = spawn_real_e2e_judge_node(
         &root,
@@ -251,6 +343,78 @@ fn assert_real_microvm_result(
                 .map(|artifact| artifact.digest().as_str()),
             Some(ALGORITHM_C_OUTPUT_CONTENT_DIGEST)
         );
+    }
+    Ok(())
+}
+
+struct CancellationResultExecutor;
+
+impl StageExecutor for CancellationResultExecutor {
+    fn kind(&self) -> ExecutorKind {
+        ExecutorKind::DevelopmentMock
+    }
+
+    fn production_eligible(&self) -> bool {
+        false
+    }
+
+    fn node_id(&self) -> Option<NodeId> {
+        None
+    }
+
+    fn supports(&self, capability: &Capability) -> bool {
+        capability.as_str() == "algorithm.batch"
+    }
+
+    fn execute(&mut self, _context: StageContext<'_>) -> StageExecution {
+        StageExecution::Cancelled {
+            usage: ResourceUsage::default(),
+            diagnostics: Vec::new(),
+            evidence: Vec::new(),
+        }
+    }
+}
+
+fn assert_cancelled_microvm_result(
+    result: &openoj_domain::EvaluationResult,
+) -> Result<(), Box<dyn Error>> {
+    assert_eq!(result.verdict(), Verdict::Cancelled);
+    assert_eq!(
+        result.provenance().executor_kind(),
+        ExecutorKind::DevelopmentMock
+    );
+    assert!(!result.provenance().production_eligible());
+    assert!(result.provenance().node_id().is_none());
+    let cancelled_index = result
+        .stages()
+        .iter()
+        .position(|stage| stage.status() == StageStatus::Cancelled)
+        .ok_or("cancelled stage missing")?;
+    assert!(
+        result.stages()[cancelled_index + 1..]
+            .iter()
+            .all(|stage| stage.status() == StageStatus::Skipped),
+        "stages after cancellation must be skipped"
+    );
+    Ok(())
+}
+
+fn submit_request(
+    root: &Path,
+    database_url: &str,
+    request_path: &Path,
+) -> Result<(), Box<dyn Error>> {
+    let submit = cargo_process(root, "openoj-cli")
+        .env("OPENOJ_DATABASE_URL", database_url)
+        .arg("submit")
+        .arg(request_path)
+        .output()?;
+    if !submit.status.success() {
+        return Err(format!(
+            "CLI submit process failed: {}",
+            String::from_utf8_lossy(&submit.stderr)
+        )
+        .into());
     }
     Ok(())
 }
@@ -752,6 +916,7 @@ fn unique_firecracker_request(
     runtime_digest: &str,
     source_sha256: &str,
     source_size: usize,
+    wall_time_ms: u64,
 ) -> Result<String, Box<dyn Error>> {
     let milliseconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
     let label = format!("fc{}_{}", std::process::id(), milliseconds);
@@ -768,6 +933,10 @@ fn unique_firecracker_request(
         .replace(
             "\"size_bytes\": 128",
             &format!("\"size_bytes\": {source_size}"),
+        )
+        .replace(
+            "\"wall_time_ms\": 2000",
+            &format!("\"wall_time_ms\": {wall_time_ms}"),
         )
         .replace("runtime_cpp_01", "runtime_algorithm_c_v0alpha1")
         .replace(&"3".repeat(64), runtime_hex);
@@ -792,6 +961,10 @@ fn cargo_process(root: &Path, package: &str) -> Command {
 }
 
 fn wait_for_socket(path: &Path) -> Result<(), Box<dyn Error>> {
+    wait_for_path(path, "control-plane UDS listener")
+}
+
+fn wait_for_path(path: &Path, description: &str) -> Result<(), Box<dyn Error>> {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         if path.exists() {
@@ -799,7 +972,37 @@ fn wait_for_socket(path: &Path) -> Result<(), Box<dyn Error>> {
         }
         thread::sleep(Duration::from_millis(50));
     }
-    Err("control-plane did not create its UDS listener".into())
+    Err(format!("timed out waiting for {description}").into())
+}
+
+fn current_unix_millis() -> Result<UnixMillis, Box<dyn Error>> {
+    let milliseconds = u64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis())?;
+    Ok(UnixMillis::new(milliseconds)?)
+}
+
+fn assert_cancelled_status(
+    root: &Path,
+    database_url: &str,
+    evaluation_id: &str,
+) -> Result<(), Box<dyn Error>> {
+    let status = cargo_process(root, "openoj-cli")
+        .env("OPENOJ_DATABASE_URL", database_url)
+        .arg("status")
+        .arg(evaluation_id)
+        .output()?;
+    if !status.status.success() {
+        return Err(format!(
+            "CLI status process failed: {}",
+            String::from_utf8_lossy(&status.stderr)
+        )
+        .into());
+    }
+    let stdout = String::from_utf8(status.stdout)?;
+    assert!(
+        stdout.contains("state=cancelled terminal_result=true"),
+        "cancelled terminal result must remain visible, got: {stdout}"
+    );
+    Ok(())
 }
 
 fn wait_for_terminal_status(
@@ -880,6 +1083,17 @@ impl ChildGuard {
     fn stop(&mut self) {
         let _ignored = self.0.kill();
         let _ignored = self.0.wait();
+    }
+
+    fn wait_for_exit(&mut self, timeout: Duration) -> Result<ExitStatus, Box<dyn Error>> {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if let Some(status) = self.0.try_wait()? {
+                return Ok(status);
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        Err("child process did not exit before the deadline".into())
     }
 }
 

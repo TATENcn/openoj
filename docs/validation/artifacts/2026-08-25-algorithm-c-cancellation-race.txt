@@ -1,0 +1,65 @@
+OpenOJ algorithm-c real-microVM cancellation race validation
+Date: 2026-08-25 Asia/Shanghai
+Implementation commit: a564d092c738ab38ce04038b61cbb64d204d7b90
+
+Environment
+Linux 7.1.8-zen1-3-zen x86_64
+AMD Ryzen 9 9950X3D, 8 visible CPUs, 15 GiB memory, VMware AMD-V
+/dev/kvm crw-rw-rw- root:kvm; KVM API version 12
+Firecracker v1.16.1
+Rust/Cargo 1.97.1
+PostgreSQL 18-alpine image:
+postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+
+Workload and runtime artifacts
+infinite-loop source: 84950edbf9514ebef845181f9f296bf2a71be3032f0d1d27b28b93fe1fd57f54
+kernel: 882fa465c43ab7d92e31bd4167da3ad6a82cb9230f9b0016176df597c6014cef
+rootfs: 4f4121a3f5ea7dc6e34e63f3d704b77f3da30aebb3d7d55f846b13badff3461c
+guest agent: e775d7d0fe71b8980a58ad02b2a9b8ac1195d6b32fc745db659750e46373cae2
+manifest: c89e99d95ed258901bda15d00c9154e956ab1295d3f4043d771394ed5461a23b
+SPDX SBOM: aee7b475b81add5b58f497accdad5d4ef10a5ba8ad06e89007e2427e904ecddb
+manifest checksum file: 3a0e0453a74c917ebb5ff573f69f05e004f509aaad2cd6ae4f8f9732d02917dc
+sha256sum --check --strict manifest.sha256: PASS
+
+Focused strict cancellation test
+$ OPENOJ_REQUIRE_KVM=1 OPENOJ_TEST_DATABASE_URL=<isolated-postgresql-18> \
+    cargo test -p openoj-control-plane --test process_e2e \
+    real_microvm_cancellation_wins_late_result_and_reclaims \
+    --locked -- --nocapture --test-threads=1
+PASS (1 test, 16.16 s)
+
+Assertions
+- a real Firecracker process reaches an active API socket for an 8-second infinite-loop request
+- control-plane cancellation wins and persists state=cancelled with terminal_result=true
+- identical cancellation replay returns the same snapshot
+- the judge node exits non-zero when its post-execution result is rejected as late/conflicting
+- CLI status remains responsive and observes the cancelled terminal
+- persisted cancellation is canonical, with explicit development-mock provenance rather than
+  fabricating Firecracker-produced cancellation evidence
+- Firecracker API and vsock paths are absent after bounded executor teardown
+
+Workspace gates
+cargo fmt --all -- --check: PASS
+cargo check --workspace --all-targets --locked: PASS
+cargo clippy --workspace --all-targets --locked -- -D warnings: PASS
+DATABASE_URL=<isolated-postgresql-18> OPENOJ_TEST_DATABASE_URL=<same> OPENOJ_REQUIRE_KVM=1 \
+  cargo test --workspace --all-targets --locked: PASS (152 tests)
+process_e2e: PASS (9 tests, 18.86 s)
+strict algorithm-c KVM runtime smoke: PASS (1 test, 1.86 s)
+PostgreSQL control-spine: PASS (17 tests)
+cargo deny --locked check advisories bans sources: PASS (existing duplicate-version warnings only)
+python3 scripts/check-workspace.py: PASS
+bash scripts/check-docs.sh: PASS before adding this record
+change-openoj-sandbox, develop-openoj and verify-openoj quick validators: PASS
+
+Verified boundary
+This validates first-terminal-wins fencing and bounded eventual reclamation while a real microVM
+workload is active. It does not validate immediate guest interruption: the current synchronous
+executor waits for the guest stage deadline before teardown and late-result submission. No guest
+Cancel message, periodic in-flight lease renewal, external CLI cancel command, production jailer,
+or malicious resource-exhaustion matrix was added or claimed.
+
+Cleanup
+No Firecracker process remained. Every per-test database was dropped. The task-local PostgreSQL
+container and isolated Python validator environment were removed after validation. Generated
+runtime outputs remain ignored by Git; the pre-existing shared offline cache was retained.
