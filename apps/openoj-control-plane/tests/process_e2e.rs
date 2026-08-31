@@ -202,6 +202,101 @@ fn real_microvm_cancellation_interrupts_and_reclaims() -> Result<(), Box<dyn Err
     Ok(())
 }
 
+#[test]
+fn real_microvm_control_disconnect_reclaims_and_recovers() -> Result<(), Box<dyn Error>> {
+    let Some(images) = load_runtime_images()? else {
+        return unavailable("algorithm-c runtime images are not provisioned");
+    };
+    if !kvm_accessible() {
+        return unavailable("/dev/kvm is absent or not read-write accessible");
+    }
+    let firecracker = firecracker_path();
+    if !firecracker_available(&firecracker) {
+        return unavailable("Firecracker is absent or not executable");
+    }
+
+    let test_db = FreshDatabase::new()?;
+    let database_url = test_db.url().to_owned();
+    let directory = tempfile::tempdir()?;
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))?;
+    let socket_path = directory.path().join("judge-control.sock");
+    let api_socket = directory.path().join("firecracker.sock");
+    let vsock_socket = directory.path().join("vsock.sock");
+    let source_path = directory.path().join("main.c");
+    fs::write(&source_path, ALGORITHM_C_TIMEOUT_SOURCE)?;
+    let request_path = directory.path().join("request.json");
+    let evaluation_id = unique_firecracker_request(
+        &request_path,
+        &format!("sha256:{}", images.runtime_sha256),
+        ALGORITHM_C_TIMEOUT_SOURCE_SHA256,
+        ALGORITHM_C_TIMEOUT_SOURCE.len(),
+        8_000,
+    )?;
+    let root = workspace_root()?;
+
+    let mut control_plane = spawn_real_e2e_control_plane(&database_url, &socket_path)?;
+    wait_for_socket(&socket_path)?;
+    submit_request(&root, &database_url, &request_path)?;
+    let mut judge_node = spawn_real_e2e_judge_node(
+        &root,
+        &socket_path,
+        &api_socket,
+        &vsock_socket,
+        &source_path,
+        &firecracker,
+        &images,
+    )?;
+
+    wait_for_path(&api_socket, "Firecracker API socket")?;
+    control_plane.stop();
+    let reclamation_started = Instant::now();
+    wait_for_paths_absent(&[&api_socket, &vsock_socket], Duration::from_secs(3))?;
+    wait_for_child_exit(&mut judge_node, Duration::from_secs(3))?;
+    assert!(
+        reclamation_started.elapsed() < Duration::from_secs(3),
+        "control disconnect must reclaim before the guest stage deadline"
+    );
+
+    fs::remove_file(&socket_path)?;
+    let mut recovered_control_plane = spawn_real_e2e_control_plane(&database_url, &socket_path)?;
+    wait_for_socket(&socket_path)?;
+    wait_for_recovered_attempt(&root, &database_url, &evaluation_id)?;
+    let mut recovered_judge_node = spawn_real_e2e_judge_node(
+        &root,
+        &socket_path,
+        &api_socket,
+        &vsock_socket,
+        &source_path,
+        &firecracker,
+        &images,
+    )?;
+    wait_for_any_terminal_status(&root, &database_url, &evaluation_id)?;
+    let result = persisted_result(&database_url, &evaluation_id)?;
+    assert_real_microvm_result(
+        &result,
+        RealMicrovmCase {
+            source: ALGORITHM_C_TIMEOUT_SOURCE,
+            source_sha256: ALGORITHM_C_TIMEOUT_SOURCE_SHA256,
+            expected_verdict: Verdict::TimeLimitExceeded,
+            failed_stage: Some(StageKind::Run),
+            wall_time_ms: 8_000,
+        },
+    )?;
+
+    recovered_judge_node.stop();
+    recovered_control_plane.stop();
+    assert!(
+        !api_socket.exists(),
+        "Firecracker API socket was not reclaimed"
+    );
+    assert!(
+        !vsock_socket.exists(),
+        "Firecracker vsock path was not reclaimed"
+    );
+    fs::remove_file(socket_path)?;
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 struct RealMicrovmCase {
     source: &'static [u8],
@@ -977,6 +1072,17 @@ fn wait_for_paths_absent(paths: &[&Path], timeout: Duration) -> Result<(), Box<d
         thread::sleep(Duration::from_millis(25));
     }
     Err("timed out waiting for Firecracker resource reclamation".into())
+}
+
+fn wait_for_child_exit(child: &mut ChildGuard, timeout: Duration) -> Result<(), Box<dyn Error>> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !child.is_running()? {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    Err("timed out waiting for child process exit".into())
 }
 
 fn assert_cancelled_status(
