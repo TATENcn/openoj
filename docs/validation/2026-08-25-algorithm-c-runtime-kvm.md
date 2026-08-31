@@ -16,6 +16,10 @@ references:
 
 # algorithm-c 真实 KVM smoke 验证（2026-08-25）
 
+> 后续证据：`2026-08-25-algorithm-c-rootfs-reproducibility.md` 已在相同主机与工具版本下关闭
+> 本记录的 rootfs 重复构建 bit-for-bit `Unverified` 项，并用新镜像摘要重跑真实 KVM smoke。
+> 本记录仍保留其原始 commit、镜像与当时结论。
+
 ## 范围与结论
 
 本记录验证 commit `1fb82ec1e819082578a1ebf160a69b302ddb1b8f` 及其父提交提供的

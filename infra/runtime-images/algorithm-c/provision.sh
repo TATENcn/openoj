@@ -13,6 +13,7 @@ readonly CACHE_DIR="${OPENOJ_RUNTIME_CACHE:-/tmp/openoj-algorithm-c-cache}"
 readonly SOURCE_DATE_EPOCH=1711929600
 readonly ROOTFS_BYTES=536870912
 readonly ROOTFS_UUID=8d617bd3-5336-4aec-926a-1d5c12d7f009
+readonly ROOTFS_HASH_SEED=8d617bd3-5336-4aec-926a-1d5c12d7f009
 
 require_tool() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -21,7 +22,7 @@ require_tool() {
   fi
 }
 
-for tool in bsdtar cargo curl cut file find grep install jq mke2fs mktemp mv rm sha256sum touch truncate uname unshare; do
+for tool in bsdtar cargo curl cut file grep install jq mke2fs mktemp mv rm sha256sum tar truncate uname unshare; do
   require_tool "$tool"
 done
 
@@ -89,6 +90,7 @@ fi
 
 readonly BUILD_DIR="$(mktemp -d /tmp/openoj-algorithm-c-build.XXXXXX)"
 readonly STAGING_DIR="$BUILD_DIR/rootfs"
+readonly ROOTFS_ARCHIVE="$BUILD_DIR/rootfs.tar"
 readonly ROOTFS_IMAGE="$BUILD_DIR/rootfs.ext4"
 
 cleanup() {
@@ -117,12 +119,16 @@ test -x "$STAGING_DIR/usr/local/bin/openoj-guest-agent"
 test -x "$STAGING_DIR/sbin/openoj-init"
 test -d "$STAGING_DIR/work"
 
-find "$STAGING_DIR" -exec touch --no-dereference --date="@$SOURCE_DATE_EPOCH" {} +
+tar --sort=name --format=posix --mtime="@$SOURCE_DATE_EPOCH" \
+  --owner=0 --group=0 --numeric-owner --no-acls --no-selinux --no-xattrs \
+  --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
+  --directory "$STAGING_DIR" --create --file "$ROOTFS_ARCHIVE" .
 truncate --size "$ROOTFS_BYTES" "$ROOTFS_IMAGE"
 E2FSPROGS_FAKE_TIME="$SOURCE_DATE_EPOCH" \
   unshare --user --map-root-user -- \
   mke2fs -q -t ext4 -L openoj-alg-c -U "$ROOTFS_UUID" \
-  -O '^has_journal' -E root_owner=0:0 -d "$STAGING_DIR" "$ROOTFS_IMAGE"
+  -O '^has_journal' -E root_owner=0:0,hash_seed="$ROOTFS_HASH_SEED" \
+  -d "$ROOTFS_ARCHIVE" "$ROOTFS_IMAGE"
 
 install --mode 0444 "$KERNEL_CACHE" "$OUTPUT_DIR/kernel/vmlinux.bin"
 install --mode 0444 "$ROOTFS_IMAGE" "$OUTPUT_DIR/rootfs/rootfs.ext4"

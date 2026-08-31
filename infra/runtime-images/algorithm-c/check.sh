@@ -6,6 +6,7 @@ readonly RUNTIME_DIR="$(cd "$(dirname "$0")" && pwd)"
 readonly LOCK_FILE="$RUNTIME_DIR/sources.lock.json"
 
 bash -n "$RUNTIME_DIR/provision.sh"
+bash -n "$RUNTIME_DIR/verify-reproducible.sh"
 bash -n "$RUNTIME_DIR/rootfs/sbin/openoj-init"
 
 jq -e '
@@ -27,6 +28,8 @@ jq -e '
 
 grep -Fq 'OPENOJ_RUNTIME_OFFLINE' "$RUNTIME_DIR/provision.sh"
 grep -Fq 'x86_64-unknown-linux-musl' "$RUNTIME_DIR/provision.sh"
+grep -Fq 'delete=atime,delete=ctime' "$RUNTIME_DIR/provision.sh"
+grep -Fq 'hash_seed="$ROOTFS_HASH_SEED"' "$RUNTIME_DIR/provision.sh"
 grep -Fq 'guest_network: "absent"' "$RUNTIME_DIR/provision.sh"
 grep -Fq 'install -d --mode 0700 "$STAGING_DIR/work"' "$RUNTIME_DIR/provision.sh"
 grep -Fq "grep -qs ' /dev devtmpfs ' /proc/mounts" "$RUNTIME_DIR/rootfs/sbin/openoj-init"
